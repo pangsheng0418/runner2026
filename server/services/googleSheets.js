@@ -1,0 +1,662 @@
+const fs = require('fs');
+const path = require('path');
+const { google } = require('googleapis');
+
+const SYSTEM_HEADERS = ['報名序號', '報名時間', '應繳總金額', '繳費狀態'];
+
+/**
+ * 從完整 Google Sheets 網址或純 ID 擷取 Spreadsheet ID
+ */
+function extractSpreadsheetId(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+  const match = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (match) return match[1];
+  return raw;
+}
+
+/**
+ * 檢查系統是否已設定 Google Service Account 憑證
+ */
+function getServiceAccountAuth() {
+  const keyPathEnv = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH;
+  const emailEnv = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const privateKeyEnv = process.env.GOOGLE_PRIVATE_KEY;
+
+  const scopes = [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive.file',
+  ];
+
+  // 方式 1：使用環境變數直接設定
+  if (emailEnv && privateKeyEnv) {
+    return new google.auth.JWT({
+      email: emailEnv.trim(),
+      key: privateKeyEnv.replace(/\\n/g, '\n'),
+      scopes,
+    });
+  }
+
+  // 方式 2：讀取本地 JSON 金鑰檔
+  if (keyPathEnv) {
+    const resolved = path.isAbsolute(keyPathEnv)
+      ? keyPathEnv
+      : path.resolve(__dirname, '..', '..', keyPathEnv);
+    if (fs.existsSync(resolved)) {
+      return new google.auth.GoogleAuth({
+        keyFile: resolved,
+        scopes,
+      });
+    }
+  }
+
+  // 預設檢查 credentials/google-service-account.json
+  const defaultPath = path.resolve(__dirname, '..', '..', 'credentials', 'google-service-account.json');
+  if (fs.existsSync(defaultPath)) {
+    return new google.auth.GoogleAuth({
+      keyFile: defaultPath,
+      scopes,
+    });
+  }
+
+  return null;
+}
+
+function getCredentialsStatus() {
+  const auth = getServiceAccountAuth();
+  let serviceAccountEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '';
+
+  if (!serviceAccountEmail) {
+    const keyPathEnv = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH || './credentials/google-service-account.json';
+    const resolved = path.isAbsolute(keyPathEnv)
+      ? keyPathEnv
+      : path.resolve(__dirname, '..', '..', keyPathEnv);
+    if (fs.existsSync(resolved)) {
+      try {
+        const json = JSON.parse(fs.readFileSync(resolved, 'utf8'));
+        serviceAccountEmail = json.client_email || '';
+      } catch (_) {
+        // ignore parse errors
+      }
+    }
+  }
+
+  return {
+    configured: Boolean(auth),
+    serviceAccountEmail,
+    autoShareEmail: process.env.GOOGLE_AUTO_SHARE_EMAIL || '',
+  };
+}
+
+/**
+ * 將 Google API 錯誤轉為使用者友善的繁體中文診斷提示
+ */
+function formatGoogleError(err) {
+  const status = err?.code || err?.response?.status;
+  const msg = err?.response?.data?.error?.message || err?.message || String(err);
+
+  if (status === 403 || /permission|forbidden|caller does not have permission/i.test(msg)) {
+    return 'Google 試算表權限不足（403）：請確認已將該試算表「共用（編輯者權限）」給 Service Account 的 Email，並已於 GCP 啟用 Google Sheets API。';
+  }
+  if (status === 404 || /not found/i.test(msg)) {
+    return '找不到指定的 Google 試算表或工作表（404）：請確認試算表 ID / 連結是否正確，且試算表未被刪除。';
+  }
+  if (status === 401 || /invalid_grant|unauthorized/i.test(msg)) {
+    return 'Google API 憑證驗證失敗（401）：請檢查 Service Account JSON 金鑰是否正確或已遭撤銷。';
+  }
+  if (/ENOTFOUND|ETIMEDOUT|ECONNREFUSED|fetch failed/i.test(msg)) {
+    return '無法連線至 Google 伺服器，請檢查網路環境或稍後重試。';
+  }
+  return `Google 試算表同步異常：${msg}`;
+}
+
+/**
+ * 依據活動的動態表單欄位產生標準表頭陣列
+ */
+function buildExpectedHeaders(fields) {
+  const dynamicLabels = (fields || [])
+    .filter((f) => f.type !== 'calculated')
+    .map((f) => String(f.label || f.id).trim());
+  return [...SYSTEM_HEADERS, ...dynamicLabels];
+}
+
+/**
+ * 將欄位名稱轉為試算表 A1 欄字母（1 -> A, 27 -> AA）
+ */
+function colNumberToLetter(num) {
+  let col = '';
+  let n = num;
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    col = String.fromCharCode(65 + rem) + col;
+    n = Math.floor((n - 1) / 26);
+  }
+  return col || 'A';
+}
+
+/**
+ * 確保指定工作表分頁存在，若不存在則自動新增
+ */
+async function ensureWorksheetTab(sheetsApi, spreadsheetId, tabName) {
+  const meta = await sheetsApi.spreadsheets.get({ spreadsheetId });
+  const existing = (meta.data.sheets || []).find(
+    (s) => s.properties?.title === tabName
+  );
+  if (existing) {
+    return existing.properties.sheetId;
+  }
+
+  const addRes = await sheetsApi.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          addSheet: {
+            properties: {
+              title: tabName,
+              gridProperties: { frozenRowCount: 1 },
+            },
+          },
+        },
+      ],
+    },
+  });
+  return addRes.data.replies?.[0]?.addSheet?.properties?.sheetId;
+}
+
+/**
+ * 模式 A：自動建立一個新的獨立 Google 試算表並初始化表頭
+ */
+async function createSpreadsheetForEvent(event, fields) {
+  const auth = getServiceAccountAuth();
+  if (!auth) {
+    throw new Error(
+      '尚未設定 Google Service Account 憑證。請依 docs/GOOGLE_SHEETS_SETUP.md 放置金鑰後再試，或改用 GAS Webhook 模式。'
+    );
+  }
+
+  try {
+    const sheets = google.sheets({ version: 'v4', auth });
+    const tabName = event.sheet_tab_name || '報名資料';
+    const headers = buildExpectedHeaders(fields);
+
+    const createRes = await sheets.spreadsheets.create({
+      requestBody: {
+        properties: {
+          title: `[路跑報名] ${event.name}`,
+          locale: 'zh_TW',
+          timeZone: 'Asia/Taipei',
+        },
+        sheets: [
+          {
+            properties: {
+              title: tabName,
+              gridProperties: { frozenRowCount: 1 },
+            },
+          },
+        ],
+      },
+    });
+
+    const spreadsheetId = createRes.data.spreadsheetId;
+    const spreadsheetUrl = createRes.data.spreadsheetUrl;
+    const sheetGid = createRes.data.sheets?.[0]?.properties?.sheetId || 0;
+
+    // 寫入表頭並加上深灰橘色運動風樣式
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `'${tabName}'!A1:${colNumberToLetter(headers.length)}1`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [headers] },
+    });
+
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            repeatCell: {
+              range: {
+                sheetId: sheetGid,
+                startRowIndex: 0,
+                endRowIndex: 1,
+              },
+              cell: {
+                userEnteredFormat: {
+                  backgroundColor: { red: 0.06, green: 0.09, blue: 0.16 },
+                  textFormat: {
+                    foregroundColor: { red: 1, green: 1, blue: 1 },
+                    bold: true,
+                    fontSize: 10,
+                  },
+                },
+              },
+              fields: 'userEnteredFormat(backgroundColor,textFormat)',
+            },
+          },
+        ],
+      },
+    });
+
+    // 若有設定個人 Email，自動分享編輯權限給管理者
+    const shareEmail = (process.env.GOOGLE_AUTO_SHARE_EMAIL || '').trim();
+    if (shareEmail) {
+      try {
+        const drive = google.drive({ version: 'v3', auth });
+        await drive.permissions.create({
+          fileId: spreadsheetId,
+          requestBody: {
+            type: 'user',
+            role: 'writer',
+            emailAddress: shareEmail,
+          },
+          sendNotificationEmail: false,
+        });
+      } catch (shareErr) {
+        console.warn('[GoogleSheets] 自動分享試算表權限失敗（不影響試算表建立）：', shareErr.message);
+      }
+    }
+
+    return {
+      sheetId: spreadsheetId,
+      sheetUrl: spreadsheetUrl,
+      tabName,
+      headers,
+    };
+  } catch (err) {
+    throw new Error(formatGoogleError(err));
+  }
+}
+
+/**
+ * 呼叫 Google Apps Script Webhook（模式 B）
+ */
+async function callGasWebhook(webhookUrl, payload) {
+  if (!webhookUrl) {
+    throw new Error('請先填入 Google Apps Script 網頁應用程式網址（Webhook URL）。');
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(`GAS Webhook 回傳非 JSON 格式（HTTP ${res.status}），請確認已部署為「所有人皆可存取」的網頁應用程式。`);
+    }
+    if (!res.ok || data.ok === false) {
+      throw new Error(data.error || `GAS Webhook 執行失敗（HTTP ${res.status}）`);
+    }
+    return data;
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error('Google Apps Script Webhook 連線逾時（15 秒），請稍後再試。');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 同步表頭至對應 Google 試算表第一列（新增欄位自動對齊不破壞舊資料）
+ */
+async function syncSheetHeaders(event, fields) {
+  const mode = event.sheet_sync_mode || 'local';
+  const expectedHeaders = buildExpectedHeaders(fields);
+
+  if (mode === 'local') {
+    return { skipped: true, mode: 'local', headers: expectedHeaders };
+  }
+
+  if (mode === 'webhook') {
+    const res = await callGasWebhook(event.gas_webhook_url, {
+      action: 'sync_headers',
+      tabName: event.sheet_tab_name || '報名資料',
+      headers: expectedHeaders,
+    });
+    return { synced: true, mode: 'webhook', headers: res.headers || expectedHeaders };
+  }
+
+  // mode === 'api'
+  const auth = getServiceAccountAuth();
+  if (!auth) {
+    throw new Error('未偵測到 Google Service Account 憑證，無法同步表頭。');
+  }
+  const spreadsheetId = extractSpreadsheetId(event.sheet_id || event.sheet_url);
+  if (!spreadsheetId) {
+    throw new Error('尚未綁定 Google 試算表 ID 或連結。');
+  }
+
+  try {
+    const sheets = google.sheets({ version: 'v4', auth });
+    const tabName = event.sheet_tab_name || '報名資料';
+    await ensureWorksheetTab(sheets, spreadsheetId, tabName);
+
+    // 讀取目前第一列，檢查是否已有報名資料
+    const existingRes = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${tabName}'!1:2`,
+    });
+    const rows = existingRes.data.values || [];
+    const currentHeaders = rows[0] || [];
+    const hasExistingDataRows = rows.length > 1;
+
+    let finalHeaders;
+    if (!hasExistingDataRows || currentHeaders.length === 0) {
+      // 尚無報名資料，直接完整寫入最新排序的表頭
+      finalHeaders = expectedHeaders;
+    } else {
+      // 已有報名資料：保留既有欄序避免錯位，並將新欄位附加在右側
+      finalHeaders = [...currentHeaders];
+      for (const h of expectedHeaders) {
+        if (!finalHeaders.includes(h)) {
+          finalHeaders.push(h);
+        }
+      }
+    }
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `'${tabName}'!A1:${colNumberToLetter(finalHeaders.length)}1`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [finalHeaders] },
+    });
+
+    return { synced: true, mode: 'api', headers: finalHeaders };
+  } catch (err) {
+    throw new Error(formatGoogleError(err));
+  }
+}
+
+/**
+ * 將單筆報名資料依照試算表表頭自動對齊並寫入一列
+ */
+async function appendRegistrationToSheet(event, fields, registration) {
+  const mode = event.sheet_sync_mode || 'local';
+  if (mode === 'local') {
+    return { synced: false, status: 'local', message: '目前為本地展示模式（尚未綁定雲端試算表）' };
+  }
+
+  // 建立「表頭名稱 -> 欄位值」對照表
+  const valueByHeader = {
+    '報名序號': registration.reg_code,
+    '報名時間': registration.created_at,
+    '應繳總金額': registration.total_amount,
+    '繳費狀態': registration.payment_status || '待繳費',
+  };
+
+  const answers = typeof registration.answers_json === 'string'
+    ? JSON.parse(registration.answers_json || '{}')
+    : (registration.answers || {});
+
+  for (const field of fields) {
+    if (field.type === 'calculated') continue;
+    const label = String(field.label || field.id).trim();
+    const val = answers[field.id];
+    if (Array.isArray(val)) {
+      valueByHeader[label] = val.join('、');
+    } else {
+      valueByHeader[label] = val === undefined || val === null ? '' : String(val);
+    }
+  }
+
+  const expectedHeaders = buildExpectedHeaders(fields);
+
+  if (mode === 'webhook') {
+    const res = await callGasWebhook(event.gas_webhook_url, {
+      action: 'append_row',
+      tabName: event.sheet_tab_name || '報名資料',
+      headers: expectedHeaders,
+      rowMap: valueByHeader,
+    });
+    return {
+      synced: true,
+      status: 'synced',
+      rowNumber: res.rowNumber || null,
+    };
+  }
+
+  // mode === 'api'
+  const auth = getServiceAccountAuth();
+  if (!auth) {
+    throw new Error('未偵測到 Google Service Account 憑證。');
+  }
+  const spreadsheetId = extractSpreadsheetId(event.sheet_id || event.sheet_url);
+  if (!spreadsheetId) {
+    throw new Error('尚未綁定 Google 試算表 ID。');
+  }
+
+  try {
+    const sheets = google.sheets({ version: 'v4', auth });
+    const tabName = event.sheet_tab_name || '報名資料';
+    await ensureWorksheetTab(sheets, spreadsheetId, tabName);
+
+    // 取得最新表頭（若空白則先建立）
+    const headerRes = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${tabName}'!1:1`,
+    });
+    let headers = headerRes.data.values?.[0] || [];
+    if (headers.length === 0) {
+      headers = expectedHeaders;
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `'${tabName}'!A1:${colNumberToLetter(headers.length)}1`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [headers] },
+      });
+    } else {
+      // 若有新欄位尚未出現在試算表表頭，自動補齊表頭
+      const missing = expectedHeaders.filter((h) => !headers.includes(h));
+      if (missing.length > 0) {
+        headers = [...headers, ...missing];
+        await sheets.spreadsheets.values.update({
+          spreadsheetId,
+          range: `'${tabName}'!A1:${colNumberToLetter(headers.length)}1`,
+          valueInputOption: 'USER_ENTERED',
+          requestBody: { values: [headers] },
+        });
+      }
+    }
+
+    const rowValues = headers.map((h) => (valueByHeader[h] !== undefined ? valueByHeader[h] : ''));
+
+    const appendRes = await sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range: `'${tabName}'!A:${colNumberToLetter(headers.length)}`,
+      valueInputOption: 'USER_ENTERED',
+      insertDataOption: 'INSERT_ROWS',
+      requestBody: { values: [rowValues] },
+    });
+
+    const updatedRange = appendRes.data.updates?.updatedRange || '';
+    const rowMatch = updatedRange.match(/(\d+)$/);
+
+    return {
+      synced: true,
+      status: 'synced',
+      rowNumber: rowMatch ? Number(rowMatch[1]) : null,
+    };
+  } catch (err) {
+    throw new Error(formatGoogleError(err));
+  }
+}
+
+/**
+ * 雙向同步：從 Google 試算表讀取最新列資料（更新繳費狀態、匯入雲端手動新增列）
+ */
+async function pullRowsFromSheet(event) {
+  const mode = event.sheet_sync_mode || 'local';
+  if (mode === 'local') {
+    throw new Error('目前為本地展示模式，請先切換為 Google Sheets API 或 GAS Webhook 模式。');
+  }
+
+  if (mode === 'webhook') {
+    const res = await callGasWebhook(event.gas_webhook_url, {
+      action: 'pull_rows',
+      tabName: event.sheet_tab_name || '報名資料',
+    });
+    return {
+      headers: res.headers || [],
+      rows: res.rows || [],
+    };
+  }
+
+  const auth = getServiceAccountAuth();
+  if (!auth) {
+    throw new Error('未偵測到 Google Service Account 憑證。');
+  }
+  const spreadsheetId = extractSpreadsheetId(event.sheet_id || event.sheet_url);
+  if (!spreadsheetId) {
+    throw new Error('尚未綁定 Google 試算表 ID。');
+  }
+
+  try {
+    const sheets = google.sheets({ version: 'v4', auth });
+    const tabName = event.sheet_tab_name || '報名資料';
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${tabName}'!A:ZZ`,
+    });
+    const values = res.data.values || [];
+    if (values.length === 0) {
+      return { headers: [], rows: [] };
+    }
+    const headers = values[0];
+    const rows = values.slice(1).map((rowArr, idx) => {
+      const obj = {};
+      headers.forEach((h, colIdx) => {
+        obj[h] = rowArr[colIdx] !== undefined ? rowArr[colIdx] : '';
+      });
+      return { rowNumber: idx + 2, data: obj };
+    });
+    return { headers, rows };
+  } catch (err) {
+    throw new Error(formatGoogleError(err));
+  }
+}
+
+/**
+ * 測試 Google 試算表連線狀態
+ */
+async function testSheetConnection(event) {
+  const mode = event.sheet_sync_mode || 'local';
+  if (mode === 'local') {
+    return {
+      ok: true,
+      mode: 'local',
+      message: '目前使用本地 SQLite 模式，報名資料會安全儲存於本機資料庫並支援 CSV 匯出。',
+    };
+  }
+
+  if (mode === 'webhook') {
+    const res = await callGasWebhook(event.gas_webhook_url, {
+      action: 'ping',
+      tabName: event.sheet_tab_name || '報名資料',
+    });
+    return {
+      ok: true,
+      mode: 'webhook',
+      sheetTitle: res.sheetTitle || 'Google Apps Script 試算表',
+      message: `GAS Webhook 連線成功！目標試算表：${res.sheetTitle || '已連結'}`,
+    };
+  }
+
+  const auth = getServiceAccountAuth();
+  if (!auth) {
+    throw new Error('尚未偵測到 Google Service Account 金鑰，請先完成憑證設定。');
+  }
+  const spreadsheetId = extractSpreadsheetId(event.sheet_id || event.sheet_url);
+  if (!spreadsheetId) {
+    throw new Error('請輸入 Google 試算表 ID 或完整試算表網址。');
+  }
+
+  try {
+    const sheets = google.sheets({ version: 'v4', auth });
+    const meta = await sheets.spreadsheets.get({ spreadsheetId });
+    return {
+      ok: true,
+      mode: 'api',
+      sheetTitle: meta.data.properties?.title || spreadsheetId,
+      sheetUrl: meta.data.spreadsheetUrl,
+      message: `Google Sheets API 連線成功！試算表名稱：「${meta.data.properties?.title}」`,
+    };
+  } catch (err) {
+    throw new Error(formatGoogleError(err));
+  }
+}
+
+/**
+ * 更新試算表中特定報名序號的繳費狀態
+ */
+async function updatePaymentStatusInSheet(event, regCode, newStatus) {
+  const mode = event.sheet_sync_mode || 'local';
+  if (mode === 'local') return { skipped: true };
+
+  if (mode === 'webhook') {
+    await callGasWebhook(event.gas_webhook_url, {
+      action: 'update_payment_status',
+      tabName: event.sheet_tab_name || '報名資料',
+      regCode,
+      paymentStatus: newStatus,
+    });
+    return { synced: true };
+  }
+
+  const auth = getServiceAccountAuth();
+  const spreadsheetId = extractSpreadsheetId(event.sheet_id || event.sheet_url);
+  if (!auth || !spreadsheetId) return { skipped: true };
+
+  try {
+    const sheets = google.sheets({ version: 'v4', auth });
+    const tabName = event.sheet_tab_name || '報名資料';
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${tabName}'!A:Z`,
+    });
+    const values = res.data.values || [];
+    if (values.length < 2) return { skipped: true };
+
+    const headers = values[0];
+    const regCodeCol = headers.indexOf('報名序號');
+    const statusCol = headers.indexOf('繳費狀態');
+    if (regCodeCol === -1 || statusCol === -1) return { skipped: true };
+
+    const rowIdx = values.findIndex((row, idx) => idx > 0 && row[regCodeCol] === regCode);
+    if (rowIdx === -1) return { skipped: true };
+
+    const targetCell = `'${tabName}'!${colNumberToLetter(statusCol + 1)}${rowIdx + 1}`;
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: targetCell,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [[newStatus]] },
+    });
+    return { synced: true };
+  } catch (err) {
+    console.warn('[GoogleSheets] 更新試算表繳費狀態失敗：', err.message);
+    return { synced: false, error: formatGoogleError(err) };
+  }
+}
+
+module.exports = {
+  SYSTEM_HEADERS,
+  extractSpreadsheetId,
+  getCredentialsStatus,
+  buildExpectedHeaders,
+  createSpreadsheetForEvent,
+  syncSheetHeaders,
+  appendRegistrationToSheet,
+  pullRowsFromSheet,
+  testSheetConnection,
+  updatePaymentStatusInSheet,
+};

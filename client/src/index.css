@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  /* 路跑跑道斜紋裝飾背景 */
+  .track-stripes {
+    background-image: repeating-linear-gradient(
+      -55deg,
+      rgba(255, 85, 0, 0.08),
+      rgba(255, 85, 0, 0.08) 12px,
+      transparent 12px,
+      transparent 24px
+    );
+  }
+
+  .track-lane-lines {
+    background-image: repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.06) 0px,
+      rgba(255, 255, 255, 0.06) 2px,
+      transparent 2px,
+      transparent 48px
+    );
+  }
+
+  .speed-skew {
+    transform: skewX(-10deg);
+  }
+
+  .speed-unskew {
+    transform: skewX(10deg);
+  }
+}
+
+/* 自訂捲軸風格 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #ff5500;
+}
