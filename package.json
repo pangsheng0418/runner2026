@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "路跑活動線上報名與管理平台（動態表單設計器 + Google 試算表雙向同步）",
   "main": "server/index.js",
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
     "dev:server": "node --watch server/index.js",

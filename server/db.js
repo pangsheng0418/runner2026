@@ -1,14 +1,21 @@
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const bcrypt = require('bcryptjs');
 const { DatabaseSync } = require('node:sqlite');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+const IS_VERCEL = Boolean(process.env.VERCEL);
+
+const DATA_DIR = IS_VERCEL
+  ? path.join(os.tmpdir(), 'runflow-data')
+  : path.join(__dirname, '..', 'data');
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
+const UPLOADS_DIR = IS_VERCEL
+  ? path.join(os.tmpdir(), 'runflow-uploads')
+  : path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
@@ -16,9 +23,11 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 const DB_PATH = path.join(DATA_DIR, 'runflow.db');
 const db = new DatabaseSync(DB_PATH);
 
-// 啟用外鍵與 WAL 模式提升並發效能
+// 啟用外鍵（本機使用 WAL 提升並發，Vercel 無伺服器環境使用單檔模式）
 db.exec('PRAGMA foreign_keys = ON;');
-db.exec('PRAGMA journal_mode = WAL;');
+if (!IS_VERCEL) {
+  db.exec('PRAGMA journal_mode = WAL;');
+}
 
 // 建立資料表
 db.exec(`

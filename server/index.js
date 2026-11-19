@@ -35,9 +35,9 @@ app.use('/api/admin/events', adminEventRoutes);
 app.use('/api/admin', adminRegistrationRoutes);
 app.use('/api/public', publicRoutes);
 
-// 生產環境：提供前端 React build 靜態檔
+// 生產環境（非 Vercel）：提供前端 React build 靜態檔
 const distDir = path.join(__dirname, '..', 'dist');
-if (fs.existsSync(distDir)) {
+if (!process.env.VERCEL && fs.existsSync(distDir)) {
   app.use(express.static(distDir));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/') || req.path.startsWith('/uploads/')) {
