@@ -159,6 +159,11 @@ export default function AdminEventEditorPage() {
       const res = await apiRequest(`/api/admin/events/${id}/sheets/auto-create`, {
         method: 'POST',
         auth: true,
+        body: {
+          sheet_url: event.sheet_url,
+          sheet_id: event.sheet_id,
+          sheet_tab_name: event.sheet_tab_name,
+        },
       });
       setEvent(res.event);
       showNotice('success', res.message);
@@ -675,15 +680,30 @@ export default function AdminEventEditorPage() {
             {event.sheet_sync_mode === 'api' && (
               <div className="space-y-4 rounded-xl border border-slate-700 bg-slate-950/70 p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="text-xs">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
                     <span className="font-bold text-slate-300">伺服器憑證狀態：</span>
                     {googleCreds.configured ? (
-                      <span className="text-emerald-400 font-bold">
-                        已載入（{googleCreds.serviceAccountEmail}）
-                      </span>
+                      <>
+                        <span className="text-emerald-400 font-bold">
+                          已載入（{googleCreds.serviceAccountEmail}）
+                        </span>
+                        {googleCreds.serviceAccountEmail && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard?.writeText(googleCreds.serviceAccountEmail);
+                              showNotice('success', '已複製機器人 Email！請到試算表右上角「共用」加入並設為「編輯者」。');
+                            }}
+                            className="inline-flex items-center gap-1 rounded-md bg-slate-800 px-2 py-1 text-[11px] font-semibold text-sky-300 hover:bg-slate-700"
+                          >
+                            <Copy className="h-3 w-3" />
+                            複製機器人 Email
+                          </button>
+                        )}
+                      </>
                     ) : (
                       <span className="text-amber-400 font-bold">
-                        尚未偵測到 credentials/google-service-account.json
+                        尚未偵測到憑證（請設定環境變數或 credentials/google-service-account.json）
                       </span>
                     )}
                   </div>
@@ -699,8 +719,38 @@ export default function AdminEventEditorPage() {
                     ) : (
                       <Sparkles className="h-4 w-4" />
                     )}
-                    <span>一鍵自動建立專屬 Google 試算表</span>
+                    <span>
+                      {event.sheet_url || event.sheet_id || googleCreds.masterSheetConfigured
+                        ? '一鍵自動建立專屬工作表分頁與表頭'
+                        : '一鍵自動建立專屬 Google 試算表'}
+                    </span>
                   </button>
+                </div>
+
+                {/* 免費個人 Google 帳號 3 步快速設定指引 */}
+                <div className="rounded-lg border border-sky-500/30 bg-sky-950/20 px-4 py-3 text-xs text-sky-200 space-y-1.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-bold text-sky-300">
+                      免費個人 Gmail 快速建立步驟（避開 Google 服務帳戶 0GB 建檔限制）：
+                    </span>
+                    <a
+                      href="https://sheets.new"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 rounded-md bg-sky-500 px-2.5 py-1 text-[11px] font-black text-slate-950 hover:bg-sky-400"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      1. 點此開新空白試算表
+                    </a>
+                  </div>
+                  <p className="text-slate-300">
+                    2. 開啟後點右上角「共用」，加入上方機器人 Email 並設為「編輯者」 → 3. 把瀏覽器網址貼到下方欄位 → 點綠色「一鍵自動建立專屬工作表分頁與表頭」即可完成！
+                    {googleCreds.masterSheetConfigured && (
+                      <span className="ml-1 font-bold text-emerald-300">
+                        （已偵測到母試算表 GOOGLE_MASTER_SHEET_ID，可直接點擊綠色按鈕！）
+                      </span>
+                    )}
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

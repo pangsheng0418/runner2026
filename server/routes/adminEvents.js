@@ -130,7 +130,12 @@ router.post('/', async (req, res) => {
     : 'local';
 
   const sheetUrl = String(body.sheet_url || '').trim();
-  const sheetId = extractSpreadsheetId(body.sheet_id || sheetUrl);
+  let sheetId = '';
+  try {
+    sheetId = extractSpreadsheetId(body.sheet_id || sheetUrl);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
   const sheetTabName = String(body.sheet_tab_name || '報名資料').trim() || '報名資料';
 
   const stmt = db.prepare(`
@@ -218,7 +223,12 @@ router.put('/:id', async (req, res) => {
 
   const rawSheetUrl = body.sheet_url !== undefined ? String(body.sheet_url).trim() : existing.sheet_url;
   const rawSheetId = body.sheet_id !== undefined ? String(body.sheet_id).trim() : existing.sheet_id;
-  const sheetId = extractSpreadsheetId(rawSheetId || rawSheetUrl);
+  let sheetId = '';
+  try {
+    sheetId = extractSpreadsheetId(rawSheetId || rawSheetUrl);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
   const sheetUrl = rawSheetUrl || (sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit` : '');
   const sheetTabName = body.sheet_tab_name !== undefined
     ? (String(body.sheet_tab_name).trim() || '報名資料')
@@ -353,7 +363,11 @@ router.post('/:id/sheets/auto-create', async (req, res) => {
   }
   const fields = JSON.parse(event.fields_json || '[]');
   try {
-    const created = await createSpreadsheetForEvent(event, fields);
+    const created = await createSpreadsheetForEvent(event, fields, {
+      sheetId: req.body?.sheet_id,
+      sheetUrl: req.body?.sheet_url,
+      tabName: req.body?.sheet_tab_name,
+    });
     db.prepare(`
       UPDATE events SET
         sheet_sync_mode = 'api',
@@ -366,10 +380,15 @@ router.post('/:id/sheets/auto-create', async (req, res) => {
     `).run(created.sheetId, created.sheetUrl, created.tabName, id);
 
     const updated = db.prepare('SELECT * FROM events WHERE id = ?').get(id);
+    const successMsg =
+      created.createdType === 'tab'
+        ? `已成功在試算表「${created.spreadsheetTitle || '目標試算表'}」自動建立專屬分頁「${created.tabName}」並完成表頭初始化！`
+        : '已成功建立獨立 Google 試算表並完成表頭初始化！';
+
     return res.json({
       event: formatEventRow(updated),
       created,
-      message: '已成功建立獨立 Google 試算表並完成表頭初始化！',
+      message: successMsg,
     });
   } catch (err) {
     return res.status(400).json({ error: err.message });
@@ -384,17 +403,17 @@ router.post('/:id/sheets/test', async (req, res) => {
     return res.status(404).json({ error: '找不到指定的路跑活動。' });
   }
 
-  // 允許測試畫面上尚未按儲存的設定
-  const testTarget = {
-    ...event,
-    sheet_sync_mode: req.body?.sheet_sync_mode ?? event.sheet_sync_mode,
-    sheet_id: extractSpreadsheetId(req.body?.sheet_id || req.body?.sheet_url || event.sheet_id || event.sheet_url),
-    sheet_url: req.body?.sheet_url ?? event.sheet_url,
-    sheet_tab_name: req.body?.sheet_tab_name ?? event.sheet_tab_name,
-    gas_webhook_url: req.body?.gas_webhook_url ?? event.gas_webhook_url,
-  };
-
   try {
+    // 允許測試畫面上尚未按儲存的設定
+    const testTarget = {
+      ...event,
+      sheet_sync_mode: req.body?.sheet_sync_mode ?? event.sheet_sync_mode,
+      sheet_id: extractSpreadsheetId(req.body?.sheet_id || req.body?.sheet_url || event.sheet_id || event.sheet_url),
+      sheet_url: req.body?.sheet_url ?? event.sheet_url,
+      sheet_tab_name: req.body?.sheet_tab_name ?? event.sheet_tab_name,
+      gas_webhook_url: req.body?.gas_webhook_url ?? event.gas_webhook_url,
+    };
+
     const result = await testSheetConnection(testTarget);
     return res.json(result);
   } catch (err) {

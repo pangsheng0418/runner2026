@@ -292,6 +292,16 @@ function seedInitialData() {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
+    const rawMasterSheet = String(
+      process.env.GOOGLE_MASTER_SHEET_ID || process.env.GOOGLE_MASTER_SHEET_URL || ''
+    ).replace(/^["']+/, '').replace(/["',]+$/, '').trim();
+    const masterMatch = rawMasterSheet.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    const seedSheetId = masterMatch ? masterMatch[1] : rawMasterSheet;
+    const seedSheetMode = seedSheetId ? 'api' : 'local';
+    const seedSheetUrl = seedSheetId
+      ? `https://docs.google.com/spreadsheets/d/${seedSheetId}/edit`
+      : '';
+
     const result = insertEvent.run(
       'taipei-speed-marathon-2026',
       '2026 台北疾速城市馬拉松',
@@ -306,10 +316,10 @@ function seedInitialData() {
       'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&w=1600&q=80',
       '年度最具速度感的城市路跑盛會！貫穿台北經典地標與河濱賽道，配備雙晶片即時分段計時系統、專業配速列車與頂級賽道補給。歡迎各路跑者挑戰個人最佳成績（PB）！',
       '請於報名完成後 3 日內完成匯款，並於備註填寫「報名序號」：\n銀行代碼：822（中國信託）\n帳號：1234-5678-9012-3456\n戶名：疾速路跑賽事籌備委員會\n完成轉帳後將於 1-2 個工作天內寄發入帳確認通知。',
-      'local',
-      '',
-      '',
-      '報名資料',
+      seedSheetMode,
+      seedSheetId,
+      seedSheetUrl,
+      '2026 台北疾速城市馬拉松',
       '',
       JSON.stringify(defaultFields)
     );

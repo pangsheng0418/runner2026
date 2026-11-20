@@ -10,9 +10,39 @@ const SYSTEM_HEADERS = ['報名序號', '報名時間', '應繳總金額', '繳�
 function extractSpreadsheetId(input) {
   const raw = String(input || '').trim();
   if (!raw) return '';
+  if (/\/spreadsheets\/d\/e\//.test(raw)) {
+    throw new Error(
+      '您貼的是「發布到網路」連結（/d/e/...），無法寫入資料。請改貼瀏覽器最上方網址列的正式試算表網址（/spreadsheets/d/試算表ID/edit）。'
+    );
+  }
   const match = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
   if (match) return match[1];
   return raw;
+}
+
+/**
+ * 清理環境變數中誤貼的頭尾引號、逗號與多餘空白
+ */
+function stripWrappingQuotes(raw) {
+  let s = String(raw || '').trim();
+  if (s.endsWith(',')) s = s.slice(0, -1).trim();
+  while (
+    s.length >= 2 &&
+    ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'")))
+  ) {
+    s = s.slice(1, -1).trim();
+  }
+  s = s.replace(/^["']+/, '').replace(/["',]+$/, '').trim();
+  return s;
+}
+
+/**
+ * 清理並正規化 PEM 私鑰格式（自動處理引號、逗號、\n 與 \\n）
+ */
+function normalizePrivateKey(raw) {
+  let key = stripWrappingQuotes(raw);
+  key = key.replace(/\\\\n/g, '\n').replace(/\\n/g, '\n').replace(/\r\n/g, '\n').trim();
+  return key ? `${key}\n` : '';
 }
 
 /**
@@ -20,19 +50,36 @@ function extractSpreadsheetId(input) {
  */
 function getServiceAccountAuth() {
   const keyPathEnv = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH;
-  const emailEnv = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const privateKeyEnv = process.env.GOOGLE_PRIVATE_KEY;
+  const fullJsonEnv = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  const emailEnv = stripWrappingQuotes(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL);
+  const privateKeyEnv = normalizePrivateKey(process.env.GOOGLE_PRIVATE_KEY);
 
   const scopes = [
     'https://www.googleapis.com/auth/spreadsheets',
     'https://www.googleapis.com/auth/drive.file',
   ];
 
+  // 方式 0：整份 JSON 貼在環境變數 GOOGLE_SERVICE_ACCOUNT_JSON
+  if (fullJsonEnv) {
+    try {
+      const parsed = JSON.parse(fullJsonEnv);
+      if (parsed.client_email && parsed.private_key) {
+        return new google.auth.JWT({
+          email: stripWrappingQuotes(parsed.client_email),
+          key: normalizePrivateKey(parsed.private_key),
+          scopes,
+        });
+      }
+    } catch (_) {
+      // ignore invalid json
+    }
+  }
+
   // 方式 1：使用環境變數直接設定
   if (emailEnv && privateKeyEnv) {
     return new google.auth.JWT({
-      email: emailEnv.trim(),
-      key: privateKeyEnv.replace(/\\n/g, '\n'),
+      email: emailEnv,
+      key: privateKeyEnv,
       scopes,
     });
   }
@@ -64,7 +111,16 @@ function getServiceAccountAuth() {
 
 function getCredentialsStatus() {
   const auth = getServiceAccountAuth();
-  let serviceAccountEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '';
+  let serviceAccountEmail = stripWrappingQuotes(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL);
+
+  if (!serviceAccountEmail && process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    try {
+      const parsed = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+      serviceAccountEmail = stripWrappingQuotes(parsed.client_email);
+    } catch (_) {
+      // ignore
+    }
+  }
 
   if (!serviceAccountEmail) {
     const keyPathEnv = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH || './credentials/google-service-account.json';
@@ -74,35 +130,56 @@ function getCredentialsStatus() {
     if (fs.existsSync(resolved)) {
       try {
         const json = JSON.parse(fs.readFileSync(resolved, 'utf8'));
-        serviceAccountEmail = json.client_email || '';
+        serviceAccountEmail = stripWrappingQuotes(json.client_email);
       } catch (_) {
         // ignore parse errors
       }
     }
   }
 
+  const masterSheetRaw = stripWrappingQuotes(
+    process.env.GOOGLE_MASTER_SHEET_ID || process.env.GOOGLE_MASTER_SHEET_URL
+  );
+  let masterSheetId = '';
+  try {
+    masterSheetId = extractSpreadsheetId(masterSheetRaw);
+  } catch (_) {
+    masterSheetId = '';
+  }
+
   return {
     configured: Boolean(auth),
     serviceAccountEmail,
-    autoShareEmail: process.env.GOOGLE_AUTO_SHARE_EMAIL || '',
+    autoShareEmail: stripWrappingQuotes(process.env.GOOGLE_AUTO_SHARE_EMAIL),
+    masterSheetConfigured: Boolean(masterSheetId),
+    masterSheetId,
   };
 }
 
 /**
  * 將 Google API 錯誤轉為使用者友善的繁體中文診斷提示
  */
-function formatGoogleError(err) {
+function formatGoogleError(err, context = '') {
   const status = err?.code || err?.response?.status;
   const msg = err?.response?.data?.error?.message || err?.message || String(err);
 
+  if (/DECODER routines|ERR_OSSL|PEM|private key/i.test(msg)) {
+    return 'Google 私鑰（GOOGLE_PRIVATE_KEY）格式無效：請確認已完整複製 -----BEGIN PRIVATE KEY----- 到 -----END PRIVATE KEY-----，且沒有遺漏字元。';
+  }
+  if (/has not been used in project|is disabled/i.test(msg)) {
+    return `Google Cloud 尚未啟用對應 API：請到 GCP「API 和服務 → 程式庫」啟用 Google Sheets API 與 Google Drive API。（原始訊息：${msg}）`;
+  }
+  if (/storage quota|quota has been exceeded/i.test(msg) || (context === 'create' && status === 403)) {
+    return 'Google 已限制免費服務帳戶直接「新建」雲端檔案（403 配額限制）。請改用「專屬工作表分頁」模式：先點上方「開啟空白試算表」→ 右上角「共用」給機器人 Email（編輯者）→ 將網址貼到下方欄位 → 再點一次「一鍵自動建立專屬工作表」即可立即完成！（或在 Vercel 設定 GOOGLE_MASTER_SHEET_ID 作為母試算表）';
+  }
   if (status === 403 || /permission|forbidden|caller does not have permission/i.test(msg)) {
-    return 'Google 試算表權限不足（403）：請確認已將該試算表「共用（編輯者權限）」給 Service Account 的 Email，並已於 GCP 啟用 Google Sheets API。';
+    return `Google 試算表權限不足（403）：請確認已將該試算表「共用（編輯者權限）」給 Service Account 的 Email，並已於 GCP 啟用 Google Sheets API。（Google 回覆：${msg}）`;
   }
   if (status === 404 || /not found/i.test(msg)) {
-    return '找不到指定的 Google 試算表或工作表（404）：請確認試算表 ID / 連結是否正確，且試算表未被刪除。';
+    return '找不到指定的 Google 試算表或工作表（404）：請確認試算表 ID / 連結是否正確、檔案為原生 Google 試算表（非 .xlsx），且已共用給機器人（編輯者）。';
   }
   if (status === 401 || /invalid_grant|unauthorized/i.test(msg)) {
-    return 'Google API 憑證驗證失敗（401）：請檢查 Service Account JSON 金鑰是否正確或已遭撤銷。';
+    return `Google API 憑證驗證失敗（401）：請檢查 GOOGLE_SERVICE_ACCOUNT_EMAIL 與 GOOGLE_PRIVATE_KEY 是否正確。（Google 回覆：${msg}）`;
   }
   if (/ENOTFOUND|ETIMEDOUT|ECONNREFUSED|fetch failed/i.test(msg)) {
     return '無法連線至 Google 伺服器，請檢查網路環境或稍後重試。';
@@ -164,87 +241,197 @@ async function ensureWorksheetTab(sheetsApi, spreadsheetId, tabName) {
   return addRes.data.replies?.[0]?.addSheet?.properties?.sheetId;
 }
 
+function sanitizeSheetTabName(rawName) {
+  const cleaned = String(rawName || '')
+    .replace(/[\[\]\*\?:\/\\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+  return cleaned || '報名資料';
+}
+
+async function styleAndWriteHeaderRow(sheets, spreadsheetId, sheetGid, tabName, headers) {
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `'${tabName}'!A1:${colNumberToLetter(headers.length)}1`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [headers] },
+  });
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          repeatCell: {
+            range: {
+              sheetId: sheetGid,
+              startRowIndex: 0,
+              endRowIndex: 1,
+            },
+            cell: {
+              userEnteredFormat: {
+                backgroundColor: { red: 0.06, green: 0.09, blue: 0.16 },
+                textFormat: {
+                  foregroundColor: { red: 1, green: 1, blue: 1 },
+                  bold: true,
+                  fontSize: 10,
+                },
+              },
+            },
+            fields: 'userEnteredFormat(backgroundColor,textFormat)',
+          },
+        },
+      ],
+    },
+  });
+}
+
 /**
- * 模式 A：自動建立一個新的獨立 Google 試算表並初始化表頭
+ * 模式 A：一鍵自動建立專屬工作表分頁（母試算表 / 已貼試算表，免費個人帳號 100% 適用）
+ * 或新建獨立試算表檔案（Google Workspace / 共用雲端硬碟適用）
  */
-async function createSpreadsheetForEvent(event, fields) {
+async function createSpreadsheetForEvent(event, fields, options = {}) {
   const auth = getServiceAccountAuth();
   if (!auth) {
     throw new Error(
-      '尚未設定 Google Service Account 憑證。請依 docs/GOOGLE_SHEETS_SETUP.md 放置金鑰後再試，或改用 GAS Webhook 模式。'
+      '尚未設定 Google Service Account 憑證。請依 docs/GOOGLE_SHEETS_SETUP.md 設定環境變數或金鑰後再試。'
     );
   }
 
-  try {
-    const sheets = google.sheets({ version: 'v4', auth });
-    const tabName = event.sheet_tab_name || '報名資料';
-    const headers = buildExpectedHeaders(fields);
+  const sheets = google.sheets({ version: 'v4', auth });
+  const headers = buildExpectedHeaders(fields);
 
-    const createRes = await sheets.spreadsheets.create({
-      requestBody: {
-        properties: {
-          title: `[路跑報名] ${event.name}`,
-          locale: 'zh_TW',
-          timeZone: 'Asia/Taipei',
-        },
-        sheets: [
-          {
-            properties: {
-              title: tabName,
-              gridProperties: { frozenRowCount: 1 },
-            },
-          },
-        ],
-      },
-    });
+  // 優先檢查：畫面上已貼的試算表網址、活動已綁試算表、或環境變數 GOOGLE_MASTER_SHEET_ID
+  const masterEnv = stripWrappingQuotes(
+    process.env.GOOGLE_MASTER_SHEET_ID || process.env.GOOGLE_MASTER_SHEET_URL
+  );
+  const existingTargetId = extractSpreadsheetId(
+    options.sheetId || options.sheetUrl || event.sheet_id || event.sheet_url || masterEnv
+  );
 
-    const spreadsheetId = createRes.data.spreadsheetId;
-    const spreadsheetUrl = createRes.data.spreadsheetUrl;
-    const sheetGid = createRes.data.sheets?.[0]?.properties?.sheetId || 0;
+  // ==================== 路徑 1：在已共用試算表 / 母試算表中自動建立專屬活動分頁（免費帳號 100% 成功） ====================
+  if (existingTargetId) {
+    try {
+      const requestedTab = String(options.tabName || '').trim();
+      const baseTabName =
+        requestedTab && requestedTab !== '報名資料'
+          ? sanitizeSheetTabName(requestedTab)
+          : sanitizeSheetTabName(event.name || '報名資料');
 
-    // 寫入表頭並加上深灰橘色運動風樣式
-    await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: `'${tabName}'!A1:${colNumberToLetter(headers.length)}1`,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [headers] },
-    });
+      const meta = await sheets.spreadsheets.get({ spreadsheetId: existingTargetId });
+      const existingSheets = meta.data.sheets || [];
+      let tabName = baseTabName;
+      let existingTab = existingSheets.find((s) => s.properties?.title === tabName);
+      let sheetGid;
 
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId,
-      requestBody: {
-        requests: [
-          {
-            repeatCell: {
-              range: {
-                sheetId: sheetGid,
-                startRowIndex: 0,
-                endRowIndex: 1,
-              },
-              cell: {
-                userEnteredFormat: {
-                  backgroundColor: { red: 0.06, green: 0.09, blue: 0.16 },
-                  textFormat: {
-                    foregroundColor: { red: 1, green: 1, blue: 1 },
-                    bold: true,
-                    fontSize: 10,
+      if (existingTab) {
+        sheetGid = existingTab.properties.sheetId;
+      } else {
+        const addRes = await sheets.spreadsheets.batchUpdate({
+          spreadsheetId: existingTargetId,
+          requestBody: {
+            requests: [
+              {
+                addSheet: {
+                  properties: {
+                    title: tabName,
+                    gridProperties: { frozenRowCount: 1 },
                   },
                 },
               },
-              fields: 'userEnteredFormat(backgroundColor,textFormat)',
-            },
+            ],
           },
-        ],
-      },
-    });
+        });
+        sheetGid = addRes.data.replies?.[0]?.addSheet?.properties?.sheetId || 0;
+      }
+
+      // 檢查該分頁是否已有報名資料列；若無則直接寫入格式化表頭，若有則補齊缺漏欄位
+      const curRes = await sheets.spreadsheets.values.get({
+        spreadsheetId: existingTargetId,
+        range: `'${tabName}'!1:2`,
+      });
+      const curRows = curRes.data.values || [];
+      let finalHeaders = headers;
+      if (curRows.length > 1 && curRows[0]?.length > 0) {
+        finalHeaders = [...curRows[0]];
+        for (const h of headers) {
+          if (!finalHeaders.includes(h)) finalHeaders.push(h);
+        }
+      }
+
+      await styleAndWriteHeaderRow(sheets, existingTargetId, sheetGid, tabName, finalHeaders);
+
+      const sheetUrl = `https://docs.google.com/spreadsheets/d/${existingTargetId}/edit#gid=${sheetGid}`;
+      return {
+        sheetId: existingTargetId,
+        sheetUrl,
+        tabName,
+        headers: finalHeaders,
+        createdType: 'tab',
+        spreadsheetTitle: meta.data.properties?.title || '',
+      };
+    } catch (err) {
+      throw new Error(formatGoogleError(err, 'tab'));
+    }
+  }
+
+  // ==================== 路徑 2：嘗試新建獨立試算表檔案（若有 Workspace 配額或 Shared Drive） ====================
+  try {
+    const tabName = sanitizeSheetTabName(options.tabName || event.sheet_tab_name || '報名資料');
+    const folderId = stripWrappingQuotes(process.env.GOOGLE_DRIVE_FOLDER_ID);
+    let spreadsheetId = '';
+    let spreadsheetUrl = '';
+    let sheetGid = 0;
+
+    if (folderId) {
+      const drive = google.drive({ version: 'v3', auth });
+      const fileRes = await drive.files.create({
+        supportsAllDrives: true,
+        requestBody: {
+          name: `[路跑報名] ${event.name}`,
+          mimeType: 'application/vnd.google-apps.spreadsheet',
+          parents: [folderId],
+        },
+        fields: 'id, webViewLink',
+      });
+      spreadsheetId = fileRes.data.id;
+      spreadsheetUrl =
+        fileRes.data.webViewLink || `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
+      sheetGid = await ensureWorksheetTab(sheets, spreadsheetId, tabName);
+    } else {
+      const createRes = await sheets.spreadsheets.create({
+        requestBody: {
+          properties: {
+            title: `[路跑報名] ${event.name}`,
+            locale: 'zh_TW',
+            timeZone: 'Asia/Taipei',
+          },
+          sheets: [
+            {
+              properties: {
+                title: tabName,
+                gridProperties: { frozenRowCount: 1 },
+              },
+            },
+          ],
+        },
+      });
+      spreadsheetId = createRes.data.spreadsheetId;
+      spreadsheetUrl = createRes.data.spreadsheetUrl;
+      sheetGid = createRes.data.sheets?.[0]?.properties?.sheetId || 0;
+    }
+
+    await styleAndWriteHeaderRow(sheets, spreadsheetId, sheetGid, tabName, headers);
 
     // 若有設定個人 Email，自動分享編輯權限給管理者
-    const shareEmail = (process.env.GOOGLE_AUTO_SHARE_EMAIL || '').trim();
+    const shareEmail = stripWrappingQuotes(process.env.GOOGLE_AUTO_SHARE_EMAIL);
     if (shareEmail) {
       try {
         const drive = google.drive({ version: 'v3', auth });
         await drive.permissions.create({
           fileId: spreadsheetId,
+          supportsAllDrives: true,
           requestBody: {
             type: 'user',
             role: 'writer',
@@ -262,9 +449,10 @@ async function createSpreadsheetForEvent(event, fields) {
       sheetUrl: spreadsheetUrl,
       tabName,
       headers,
+      createdType: 'spreadsheet',
     };
   } catch (err) {
-    throw new Error(formatGoogleError(err));
+    throw new Error(formatGoogleError(err, 'create'));
   }
 }
 
