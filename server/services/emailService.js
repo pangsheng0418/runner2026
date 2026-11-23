@@ -170,7 +170,7 @@ function buildRegistrationEmailContent({
                  反向查詢報名狀況 ／ 修改資料 ／ 補填匯款後五碼
                </a>
                <p style="margin:10px 0 0;font-size:12px;color:#64748b;">
-                 查詢時請輸入您的「報名序號（${escapeHtml(regCode)}）」或「電子信箱」搭配「身分證字號 / 護照號碼」即可檢視與修改。
+                 查詢時請輸入您的「報名序號（${escapeHtml(regCode)}）」或「電子信箱」搭配「身份證字號」即可檢視與修改。
                </p>
              </div>`
           : ''

@@ -7,33 +7,57 @@ const TW_ID_LETTERS = {
 export const MIN_REGISTRATION_AGE = 10;
 export const MAX_REGISTRATION_AGE = 80;
 
-export function validateTaiwanIdOrPassport(raw) {
+function normalizeGenderValue(raw) {
+  const g = String(raw || '').trim().toLowerCase();
+  if (g === '男' || g === 'm' || g === 'male') return '男';
+  if (g === '女' || g === 'f' || g === 'female') return '女';
+  return '';
+}
+
+export function extractGenderFromAnswers(fields, answers) {
+  if (!answers) return '';
+  if (answers.gender) return String(answers.gender);
+  const gf = (fields || []).find((f) => {
+    const lbl = String(f.label || '');
+    return f.id === 'gender' || lbl.includes('性別') || lbl.includes('姓別');
+  });
+  return gf && answers[gf.id] ? String(answers[gf.id]) : '';
+}
+
+export function validateTaiwanIdOrPassport(raw, gender = '') {
   const value = String(raw || '').trim().toUpperCase();
-  if (!value) return '請填寫身份證字號或護照號碼';
+  if (!value) return '請填寫身份證字號';
 
-  if (/^[A-Z]\d{9}$/.test(value)) {
-    if (!/^[A-Z][1289]\d{8}$/.test(value)) {
-      return '台灣身份證字號第 2 碼須為 1、2、8 或 9，請重新確認';
+  if (!/^[A-Z]/.test(value)) {
+    return '身份證字號第 1 碼須為英文字母（例：A123456789）';
+  }
+  if (!/^[A-Z]\d*$/.test(value)) {
+    return '身份證字號第 2 碼起須全部為數字';
+  }
+  if (value.length >= 2 && !['1', '2'].includes(value[1])) {
+    return '身份證字號第 2 碼僅限 1（男）或 2（女），不可為其他數字';
+  }
+  if (value.length !== 10) {
+    return `身份證字號須為 10 碼（1 碼英文 + 9 碼數字，目前 ${value.length} 碼）`;
+  }
+
+  const code = TW_ID_LETTERS[value[0]];
+  const nums = [Math.floor(code / 10), code % 10, ...value.slice(1).split('').map(Number)];
+  const weights = [1, 9, 8, 7, 6, 5, 4, 3, 2, 1, 1];
+  const sum = nums.reduce((acc, n, i) => acc + n * weights[i], 0);
+  if (sum % 10 !== 0) {
+    return '身份證字號檢核碼錯誤，請檢查是否輸入有誤';
+  }
+
+  const normalizedGender = normalizeGenderValue(gender);
+  if (normalizedGender) {
+    const idGender = value[1] === '1' ? '男' : '女';
+    if (idGender !== normalizedGender) {
+      return `身份證字號第 2 碼為 ${value[1]}（${idGender}），與所選性別「${normalizedGender}」不符`;
     }
-    const code = TW_ID_LETTERS[value[0]];
-    const nums = [Math.floor(code / 10), code % 10, ...value.slice(1).split('').map(Number)];
-    const weights = [1, 9, 8, 7, 6, 5, 4, 3, 2, 1, 1];
-    const sum = nums.reduce((acc, n, i) => acc + n * weights[i], 0);
-    if (sum % 10 !== 0) {
-      return '台灣身份證字號檢核碼錯誤，請檢查是否輸入有誤';
-    }
-    return '';
   }
 
-  // 外籍護照號碼：6~15 碼英數字（含至少一個數字，且不可為不完整的台灣身分證開頭純 1 英文+數字非 9 碼）
-  if (/^[A-Z]\d{1,8}$/.test(value)) {
-    return `台灣身份證字號須為 1 碼英文 + 9 碼數字（目前共 ${value.length} 碼）；外籍護照請輸入完整護照號碼`;
-  }
-
-  if (/^[A-Z0-9-]{6,15}$/.test(value) && /\d/.test(value)) {
-    return '';
-  }
-  return '請輸入正確的台灣身份證字號（10 碼，例：A123456789）或外籍護照號碼（6~15 碼英數字）';
+  return '';
 }
 
 export function calculateAge(birthDateStr, referenceDate = new Date()) {
@@ -118,7 +142,7 @@ export function isBirthDateField(field) {
 /**
  * 單一欄位即時檢核（輸入當下呼叫，isSubmit=false 時空值不報必填錯誤，只檢核已輸入格式）
  */
-export function validateSingleField(field, val, { checkRequired = false } = {}) {
+export function validateSingleField(field, val, { checkRequired = false, allAnswers = null, fields = null } = {}) {
   if (!field || field.type === 'calculated') return '';
 
   if (field.type === 'checkbox') {
@@ -135,7 +159,8 @@ export function validateSingleField(field, val, { checkRequired = false } = {}) 
   }
 
   if (field.type === 'tw_id' || field.validation === 'tw_id_or_passport') {
-    return validateTaiwanIdOrPassport(strVal);
+    const gender = extractGenderFromAnswers(fields, allAnswers);
+    return validateTaiwanIdOrPassport(strVal, gender);
   }
   if (isBirthDateField(field)) {
     return validateBirthDateAge(strVal, MIN_REGISTRATION_AGE, MAX_REGISTRATION_AGE);
@@ -167,7 +192,11 @@ export function getFieldValidBadge(field, val, error) {
   if (!strVal) return '';
 
   if (field.type === 'tw_id' || field.validation === 'tw_id_or_passport') {
-    return /^[A-Z]\d{9}$/.test(strVal.toUpperCase()) ? '身分證通過' : '護照通過';
+    const v = strVal.toUpperCase();
+    if (/^[A-Z][12]\d{8}$/.test(v)) {
+      return `身份證通過（${v[1] === '1' ? '男' : '女'}）`;
+    }
+    return '';
   }
   if (isBirthDateField(field)) {
     const age = calculateAge(strVal);
@@ -240,12 +269,61 @@ export function calculatePricing(fields, answers) {
 }
 
 /**
+ * 單一欄位更新時，同步處理跨欄位即時核對（例如切換性別時立即重新核對身份證字號第 2 碼）
+ */
+export function validateFieldWithCrossChecks(
+  fields,
+  nextAnswers,
+  fieldId,
+  prevErrors = {},
+  { checkRequired = false } = {}
+) {
+  const list = fields || [];
+  const fieldDef = list.find((f) => f.id === fieldId);
+  const nextErrors = { ...(prevErrors || {}) };
+
+  const err = validateSingleField(fieldDef, nextAnswers?.[fieldId], {
+    checkRequired,
+    allAnswers: nextAnswers,
+    fields: list,
+  });
+  if (err) nextErrors[fieldId] = err;
+  else delete nextErrors[fieldId];
+
+  const lbl = String(fieldDef?.label || '');
+  const isGenderField = fieldDef?.id === 'gender' || lbl.includes('性別') || lbl.includes('姓別');
+  if (isGenderField) {
+    const idFields = list.filter(
+      (f) => f.type === 'tw_id' || f.validation === 'tw_id_or_passport' || f.id === 'id_number'
+    );
+    for (const idf of idFields) {
+      const idVal = String(nextAnswers?.[idf.id] || '').trim();
+      if (idVal) {
+        const idErr = validateSingleField(idf, idVal, {
+          checkRequired: false,
+          allAnswers: nextAnswers,
+          fields: list,
+        });
+        if (idErr) nextErrors[idf.id] = idErr;
+        else delete nextErrors[idf.id];
+      }
+    }
+  }
+
+  return nextErrors;
+}
+
+/**
  * 前端送出前全欄位防呆檢查
  */
 export function validateAllFields(fields, answers) {
   const errors = {};
   for (const field of fields || []) {
-    const msg = validateSingleField(field, answers?.[field.id], { checkRequired: true });
+    const msg = validateSingleField(field, answers?.[field.id], {
+      checkRequired: true,
+      allAnswers: answers,
+      fields,
+    });
     if (msg) errors[field.id] = msg;
   }
   return errors;

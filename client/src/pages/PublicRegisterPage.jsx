@@ -32,7 +32,7 @@ import DynamicFormField from '../components/DynamicFormField';
 import {
   calculatePricing,
   validateAllFields,
-  validateSingleField,
+  validateFieldWithCrossChecks,
   validateRemittanceLast5,
 } from '../utils/validation';
 
@@ -134,51 +134,49 @@ export default function PublicRegisterPage() {
   );
 
   const handleFieldChange = (fieldId, val) => {
-    setAnswers((prev) => ({ ...prev, [fieldId]: val }));
-    const fieldDef = (event?.fields || []).find((f) => f.id === fieldId);
-    const liveErr = validateSingleField(fieldDef, val, { checkRequired: false });
-    setFieldErrors((prev) => {
-      const next = { ...prev };
-      if (liveErr) next[fieldId] = liveErr;
-      else delete next[fieldId];
-      return next;
-    });
+    const nextAnswers = { ...answers, [fieldId]: val };
+    setAnswers(nextAnswers);
+    setFieldErrors((prev) =>
+      validateFieldWithCrossChecks(event?.fields, nextAnswers, fieldId, prev, { checkRequired: false })
+    );
   };
 
   const handleFieldBlur = (fieldId, val) => {
-    const fieldDef = (event?.fields || []).find((f) => f.id === fieldId);
-    const blurErr = validateSingleField(fieldDef, val, { checkRequired: true });
-    setFieldErrors((prev) => {
-      const next = { ...prev };
-      if (blurErr) next[fieldId] = blurErr;
-      else delete next[fieldId];
-      return next;
-    });
+    const nextAnswers = { ...answers, [fieldId]: val };
+    setFieldErrors((prev) =>
+      validateFieldWithCrossChecks(event?.fields, nextAnswers, fieldId, prev, { checkRequired: true })
+    );
   };
 
   const handleGroupMemberFieldChange = (memberIdx, fieldId, val) => {
+    const nextMemberAns = { ...(groupMembers[memberIdx] || {}), [fieldId]: val };
     setGroupMembers((prev) =>
-      prev.map((m, idx) => (idx === memberIdx ? { ...m, [fieldId]: val } : m))
+      prev.map((m, idx) => (idx === memberIdx ? nextMemberAns : m))
     );
-    const fieldDef = (event?.fields || []).find((f) => f.id === fieldId);
-    const liveErr = validateSingleField(fieldDef, val, { checkRequired: false });
-    setMemberErrors((prev) => {
-      const nextMemberErrs = { ...(prev[memberIdx] || {}) };
-      if (liveErr) nextMemberErrs[fieldId] = liveErr;
-      else delete nextMemberErrs[fieldId];
-      return { ...prev, [memberIdx]: nextMemberErrs };
-    });
+    setMemberErrors((prev) => ({
+      ...prev,
+      [memberIdx]: validateFieldWithCrossChecks(
+        event?.fields,
+        nextMemberAns,
+        fieldId,
+        prev[memberIdx] || {},
+        { checkRequired: false }
+      ),
+    }));
   };
 
   const handleGroupMemberFieldBlur = (memberIdx, fieldId, val) => {
-    const fieldDef = (event?.fields || []).find((f) => f.id === fieldId);
-    const blurErr = validateSingleField(fieldDef, val, { checkRequired: true });
-    setMemberErrors((prev) => {
-      const nextMemberErrs = { ...(prev[memberIdx] || {}) };
-      if (blurErr) nextMemberErrs[fieldId] = blurErr;
-      else delete nextMemberErrs[fieldId];
-      return { ...prev, [memberIdx]: nextMemberErrs };
-    });
+    const nextMemberAns = { ...(groupMembers[memberIdx] || {}), [fieldId]: val };
+    setMemberErrors((prev) => ({
+      ...prev,
+      [memberIdx]: validateFieldWithCrossChecks(
+        event?.fields,
+        nextMemberAns,
+        fieldId,
+        prev[memberIdx] || {},
+        { checkRequired: true }
+      ),
+    }));
   };
 
   const addGroupMember = () => {
@@ -193,26 +191,18 @@ export default function PublicRegisterPage() {
   };
 
   const handleEditFieldChange = (fieldId, val) => {
-    setEditAnswers((prev) => ({ ...prev, [fieldId]: val }));
-    const fieldDef = (event?.fields || []).find((f) => f.id === fieldId);
-    const liveErr = validateSingleField(fieldDef, val, { checkRequired: false });
-    setEditFieldErrors((prev) => {
-      const next = { ...prev };
-      if (liveErr) next[fieldId] = liveErr;
-      else delete next[fieldId];
-      return next;
-    });
+    const nextAnswers = { ...editAnswers, [fieldId]: val };
+    setEditAnswers(nextAnswers);
+    setEditFieldErrors((prev) =>
+      validateFieldWithCrossChecks(event?.fields, nextAnswers, fieldId, prev, { checkRequired: false })
+    );
   };
 
   const handleEditFieldBlur = (fieldId, val) => {
-    const fieldDef = (event?.fields || []).find((f) => f.id === fieldId);
-    const blurErr = validateSingleField(fieldDef, val, { checkRequired: true });
-    setEditFieldErrors((prev) => {
-      const next = { ...prev };
-      if (blurErr) next[fieldId] = blurErr;
-      else delete next[fieldId];
-      return next;
-    });
+    const nextAnswers = { ...editAnswers, [fieldId]: val };
+    setEditFieldErrors((prev) =>
+      validateFieldWithCrossChecks(event?.fields, nextAnswers, fieldId, prev, { checkRequired: true })
+    );
   };
 
   // 送出個人報名或團體報名
@@ -261,11 +251,21 @@ export default function PublicRegisterPage() {
       return;
     }
 
-    if (groupPaymentMode === 'group' && groupRemittanceLast5.trim()) {
-      const err5 = validateRemittanceLast5(groupRemittanceLast5);
-      if (err5) {
-        setSubmitError(`團體${err5}`);
+    const remittanceField = (event?.fields || []).find(
+      (f) => f.id === 'remittance_last5' || f.validation === 'remittance_last5'
+    );
+    if (groupPaymentMode === 'group') {
+      if (remittanceField?.required && !groupRemittanceLast5.trim()) {
+        setSubmitError('請填寫團體匯款帳號尾五碼（5 位純數字）。');
+        window.scrollTo({ top: 200, behavior: 'smooth' });
         return;
+      }
+      if (groupRemittanceLast5.trim()) {
+        const err5 = validateRemittanceLast5(groupRemittanceLast5);
+        if (err5) {
+          setSubmitError(`團體${err5}`);
+          return;
+        }
       }
     }
 
@@ -832,13 +832,14 @@ export default function PublicRegisterPage() {
 
               <form onSubmit={handleLookup} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1">身分證字號 / 護照號碼 *</label>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">身份證字號 *</label>
                   <input
                     type="text"
                     required
+                    maxLength={10}
                     value={lookupIdNumber}
                     onChange={(e) => setLookupIdNumber(e.target.value)}
-                    placeholder="例如：A123456789"
+                    placeholder="A123456789"
                     className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 font-mono-num text-sm text-white uppercase focus:border-sky-400 focus:outline-none"
                   />
                 </div>
@@ -1234,14 +1235,15 @@ export default function PublicRegisterPage() {
 
                         {groupPaymentMode === 'group' && (
                           <div className="space-y-1">
-                            <label className="block text-xs font-bold text-amber-300">團體匯款尾五碼</label>
+                            <label className="block text-xs font-bold text-amber-300">團體匯款帳號尾五碼 *</label>
                             <input
                               type="text"
+                              required
                               inputMode="numeric"
                               maxLength={5}
                               value={groupRemittanceLast5}
                               onChange={(e) => setGroupRemittanceLast5(e.target.value.replace(/[^\d]/g, ''))}
-                              placeholder="5 位數字（尚未匯款可留空）"
+                              placeholder="請輸入 5 位數字"
                               className={`w-full rounded-xl border bg-slate-950 px-3 py-2 font-mono-num text-sm text-white focus:outline-none ${
                                 groupRemittanceLast5 && validateRemittanceLast5(groupRemittanceLast5)
                                   ? 'border-rose-500 focus:border-rose-500'

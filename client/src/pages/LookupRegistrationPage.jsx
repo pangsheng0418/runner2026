@@ -20,7 +20,7 @@ import { apiRequest } from '../api/client';
 import TurHeader from '../components/TurHeader';
 import TurFooter from '../components/TurFooter';
 import DynamicFormField from '../components/DynamicFormField';
-import { calculatePricing, validateAllFields, validateSingleField } from '../utils/validation';
+import { calculatePricing, validateAllFields, validateFieldWithCrossChecks } from '../utils/validation';
 
 export default function LookupRegistrationPage() {
   const [verifyBy, setVerifyBy] = useState('regCode'); // 'regCode' | 'email'
@@ -83,26 +83,22 @@ export default function LookupRegistrationPage() {
   };
 
   const handleEditFieldChange = (fieldId, val) => {
-    setEditAnswers((prev) => ({ ...prev, [fieldId]: val }));
-    const fieldDef = (activeRecord?.event?.fields || []).find((f) => f.id === fieldId);
-    const liveErr = validateSingleField(fieldDef, val, { checkRequired: false });
-    setEditFieldErrors((prev) => {
-      const next = { ...prev };
-      if (liveErr) next[fieldId] = liveErr;
-      else delete next[fieldId];
-      return next;
-    });
+    const nextAnswers = { ...editAnswers, [fieldId]: val };
+    setEditAnswers(nextAnswers);
+    setEditFieldErrors((prev) =>
+      validateFieldWithCrossChecks(activeRecord?.event?.fields, nextAnswers, fieldId, prev, {
+        checkRequired: false,
+      })
+    );
   };
 
   const handleEditFieldBlur = (fieldId, val) => {
-    const fieldDef = (activeRecord?.event?.fields || []).find((f) => f.id === fieldId);
-    const blurErr = validateSingleField(fieldDef, val, { checkRequired: true });
-    setEditFieldErrors((prev) => {
-      const next = { ...prev };
-      if (blurErr) next[fieldId] = blurErr;
-      else delete next[fieldId];
-      return next;
-    });
+    const nextAnswers = { ...editAnswers, [fieldId]: val };
+    setEditFieldErrors((prev) =>
+      validateFieldWithCrossChecks(activeRecord?.event?.fields, nextAnswers, fieldId, prev, {
+        checkRequired: true,
+      })
+    );
   };
 
   const handleSaveEdit = async (e) => {
@@ -220,11 +216,12 @@ export default function LookupRegistrationPage() {
           <form onSubmit={handleLookup} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
             <div>
               <label className="block text-xs font-bold text-slate-300 mb-1">
-                身份證字號 / 護照 *
+                身份證字號 *
               </label>
               <input
                 type="text"
                 required
+                maxLength={10}
                 value={idNumber}
                 onChange={(e) => setIdNumber(e.target.value)}
                 placeholder="A123456789"

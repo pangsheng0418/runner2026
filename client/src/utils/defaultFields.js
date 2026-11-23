@@ -5,7 +5,7 @@ export const FIELD_TYPES = [
   { value: 'date', label: '日期選擇器 (Date)', hasOptions: false, hasUnitPrice: false },
   { value: 'tel', label: '電話號碼 (Tel)', hasOptions: false, hasUnitPrice: false },
   { value: 'email', label: '電子信箱 (Email)', hasOptions: false, hasUnitPrice: false },
-  { value: 'tw_id', label: '身分證 / 護照驗證 (ID)', hasOptions: false, hasUnitPrice: false },
+  { value: 'tw_id', label: '身份證字號驗證 (ID)', hasOptions: false, hasUnitPrice: false },
   { value: 'select', label: '下拉選單 (Select・可計價)', hasOptions: true, hasUnitPrice: false },
   { value: 'radio', label: '單選按鈕 (Radio・可計價)', hasOptions: true, hasUnitPrice: false },
   { value: 'checkbox', label: '多選核取方塊 (Checkbox・可計價)', hasOptions: true, hasUnitPrice: false },

@@ -170,7 +170,7 @@ router.post('/lookup', (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
 
   if (!idNumber) {
-    return res.status(400).json({ error: '請輸入身分證字號或護照號碼以驗證身分。' });
+    return res.status(400).json({ error: '請輸入身份證字號以驗證身分。' });
   }
   if (!regCode && !email) {
     return res.status(400).json({ error: '請輸入「報名序號」或「報名時填寫的電子信箱」其中一項進行雙重驗證。' });
@@ -227,7 +227,7 @@ router.post('/events/:slug/lookup', (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
 
   if (!idNumber) {
-    return res.status(400).json({ error: '請輸入身分證字號或護照號碼。' });
+    return res.status(400).json({ error: '請輸入身份證字號。' });
   }
   if (!regCode && !email) {
     return res.status(400).json({ error: '請輸入「報名序號」或「電子信箱」進行雙重驗證。' });
@@ -582,11 +582,22 @@ router.post('/events/:slug/register-group', async (req, res) => {
   }
 
   const paymentMode = req.body?.payment_mode === 'individual' ? 'individual' : 'group';
+  const fields = JSON.parse(event.fields_json || '[]');
+  const remittanceField = fields.find(
+    (f) => f.id === 'remittance_last5' || f.validation === 'remittance_last5'
+  );
   const groupRemittanceLast5 = String(req.body?.group_remittance_last5 || '').trim();
-  if (paymentMode === 'group' && groupRemittanceLast5 && !isValidRemittanceLast5(groupRemittanceLast5)) {
-    return res.status(400).json({
-      error: '團體匯款帳號後五碼需為 5 位純數字（若尚未轉帳可先留空，完成匯款後再補填）。',
-    });
+  if (paymentMode === 'group') {
+    if (remittanceField?.required && !groupRemittanceLast5) {
+      return res.status(400).json({
+        error: '請填寫團體匯款帳號尾五碼（5 位純數字）。',
+      });
+    }
+    if (groupRemittanceLast5 && !isValidRemittanceLast5(groupRemittanceLast5)) {
+      return res.status(400).json({
+        error: '團體匯款帳號尾五碼需為 5 位純數字。',
+      });
+    }
   }
 
   const membersInput = Array.isArray(req.body?.members) ? req.body.members : [];
@@ -606,7 +617,6 @@ router.post('/events/:slug/register-group', async (req, res) => {
     });
   }
 
-  const fields = JSON.parse(event.fields_json || '[]');
   const memberErrors = {};
   const validatedMembers = [];
   const seenIdsInBatch = new Set();

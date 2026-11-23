@@ -1,5 +1,5 @@
 /**
- * 台灣身分證字號 / 居留證 / 外籍護照驗證與動態表單資料防呆計算
+ * 台灣身份證字號（含性別核對）與動態表單資料防呆計算
  */
 
 const TW_ID_LETTERS = {
@@ -8,10 +8,17 @@ const TW_ID_LETTERS = {
   S: 26, T: 27, U: 28, V: 29, W: 32, X: 30, Y: 31, Z: 33,
 };
 
+function normalizeGenderValue(raw) {
+  const g = String(raw || '').trim().toLowerCase();
+  if (g === '男' || g === 'm' || g === 'male') return '男';
+  if (g === '女' || g === 'f' || g === 'female') return '女';
+  return '';
+}
+
 function isValidTaiwanId(raw) {
   const value = String(raw || '').trim().toUpperCase();
-  // 本國身分證 (A123456789) 或新式外來人口居留證 (A8/A9...)
-  if (!/^[A-Z][1289]\d{8}$/.test(value)) return false;
+  // 合計 10 碼：第 1 碼英文、第 2 碼僅限 1（男）或 2（女）、後 8 碼數字
+  if (!/^[A-Z][12]\d{8}$/.test(value)) return false;
 
   const code = TW_ID_LETTERS[value[0]];
   if (!code) return false;
@@ -25,30 +32,41 @@ function isValidTaiwanId(raw) {
   return sum % 10 === 0;
 }
 
-function isValidTaiwanIdOrPassport(raw) {
+function isValidTaiwanIdOrPassport(raw, gender = '') {
   const value = String(raw || '').trim().toUpperCase();
-  if (!value) return { valid: false, message: '請填寫身分證字號或護照號碼' };
+  if (!value) return { valid: false, message: '請填寫身份證字號' };
 
-  // 若符合「1 碼英文 + 9 碼數字」格式，視為台灣身分證並嚴格檢查檢核碼
-  if (/^[A-Z]\d{9}$/.test(value)) {
-    if (isValidTaiwanId(value)) {
-      return { valid: true };
-    }
+  if (!/^[A-Z]/.test(value)) {
+    return { valid: false, message: '身份證字號第 1 碼須為英文字母（例：A123456789）' };
+  }
+  if (!/^[A-Z]\d*$/.test(value)) {
+    return { valid: false, message: '身份證字號第 2 碼起須全部為數字' };
+  }
+  if (value.length >= 2 && !['1', '2'].includes(value[1])) {
+    return { valid: false, message: '身份證字號第 2 碼僅限 1（男）或 2（女），不可為其他數字' };
+  }
+  if (value.length !== 10) {
     return {
       valid: false,
-      message: '台灣身分證字號格式或檢核碼不正確，請重新確認',
+      message: `身份證字號須為 10 碼（1 碼英文 + 9 碼數字，目前 ${value.length} 碼）`,
     };
   }
-
-  // 外籍護照號碼：6~15 碼英數字（至少包含一個數字）
-  if (/^[A-Z0-9-]{6,15}$/.test(value) && /\d/.test(value)) {
-    return { valid: true };
+  if (!isValidTaiwanId(value)) {
+    return { valid: false, message: '身份證字號檢核碼錯誤，請檢查是否輸入有誤' };
   }
 
-  return {
-    valid: false,
-    message: '請輸入正確的台灣身分證字號（10碼）或外籍護照號碼（6~15碼英數字）',
-  };
+  const normalizedGender = normalizeGenderValue(gender);
+  if (normalizedGender) {
+    const idGender = value[1] === '1' ? '男' : '女';
+    if (idGender !== normalizedGender) {
+      return {
+        valid: false,
+        message: `身份證字號第 2 碼為 ${value[1]}（${idGender}），與所選性別「${normalizedGender}」不符`,
+      };
+    }
+  }
+
+  return { valid: true };
 }
 
 const MIN_REGISTRATION_AGE = 10;
@@ -109,6 +127,16 @@ function isValidRemittanceLast5(raw) {
   return /^\d{5}$/.test(value);
 }
 
+function extractGenderFromRaw(fields, rawAnswers) {
+  if (!rawAnswers) return '';
+  if (rawAnswers.gender) return String(rawAnswers.gender);
+  const gf = (fields || []).find((f) => {
+    const lbl = String(f.label || '');
+    return f.id === 'gender' || lbl.includes('性別') || lbl.includes('姓別');
+  });
+  return gf && rawAnswers[gf.id] ? String(rawAnswers[gf.id]) : '';
+}
+
 /**
  * 依據活動的動態欄位設定，驗證前台填寫資料並計算應繳總金額
  */
@@ -117,6 +145,7 @@ function validateAndCalculateRegistration(fields, rawAnswers) {
   const cleanAnswers = {};
   const priceBreakdown = [];
   let totalAmount = 0;
+  const selectedGender = extractGenderFromRaw(fields, rawAnswers);
 
   for (const field of fields) {
     // 計算欄位本身不需使用者輸入
@@ -209,7 +238,7 @@ function validateAndCalculateRegistration(fields, rawAnswers) {
     }
 
     if (field.type === 'tw_id' || field.validation === 'tw_id_or_passport') {
-      const check = isValidTaiwanIdOrPassport(strVal);
+      const check = isValidTaiwanIdOrPassport(strVal, selectedGender);
       if (!check.valid) {
         errors[field.id] = check.message;
         continue;

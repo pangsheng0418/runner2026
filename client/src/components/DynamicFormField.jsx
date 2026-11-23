@@ -379,28 +379,34 @@ export default function DynamicFormField({ field, value, onChange, onBlur, error
         ? field.type
         : 'text';
 
+    const isTwIdField = field.type === 'tw_id' || field.validation === 'tw_id_or_passport';
     const isPhoneField = field.type === 'tel' || field.validation === 'phone';
     const isRemittanceField = field.id === 'remittance_last5' || field.validation === 'remittance_last5';
+    const cleanPlaceholder = isTwIdField
+      ? '例：A123456789'
+      : isRemittanceField && field.required
+      ? '請輸入 5 位數字'
+      : field.placeholder || '';
 
     return (
       <div className="relative">
         <input
           type={inputType}
           inputMode={isPhoneField || isRemittanceField ? 'numeric' : undefined}
-          maxLength={isRemittanceField ? 5 : isPhoneField ? 12 : undefined}
+          maxLength={isTwIdField ? 10 : isRemittanceField ? 5 : isPhoneField ? 12 : undefined}
           min={field.type === 'number' ? 0 : undefined}
           value={value ?? ''}
           onChange={(e) => {
             let nextVal = e.target.value;
-            if (field.type === 'tw_id') nextVal = nextVal.toUpperCase();
+            if (isTwIdField) nextVal = nextVal.toUpperCase();
             onChange(field.id, nextVal);
           }}
           onBlur={(e) => {
             let blurVal = e.target.value;
-            if (field.type === 'tw_id') blurVal = blurVal.toUpperCase();
+            if (isTwIdField) blurVal = blurVal.toUpperCase();
             if (onBlur) onBlur(field.id, blurVal);
           }}
-          placeholder={field.placeholder || ''}
+          placeholder={cleanPlaceholder}
           className={baseInputClass}
         />
         {field.type === 'number' && Number(field.unitPrice || 0) > 0 && (
@@ -418,11 +424,16 @@ export default function DynamicFormField({ field, value, onChange, onBlur, error
     ? field.helperText
     : '';
 
+  const displayLabel =
+    field.type === 'tw_id' || field.id === 'id_number'
+      ? String(field.label || '身份證字號').replace(/\s*[/／]\s*護照號碼?/g, '').trim() || '身份證字號'
+      : field.label;
+
   return (
     <div className="space-y-1.5">
       <label className="flex items-center justify-between text-sm font-bold text-slate-100">
         <span>
-          {field.label}
+          {displayLabel}
           {field.required && <span className="ml-1 text-lime-400">*</span>}
         </span>
       </label>
