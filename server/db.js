@@ -35,12 +35,16 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
-    display_name TEXT NOT NULL DEFAULT '系統管理員',
+    display_name TEXT NOT NULL DEFAULT '賽事承辦人',
+    role TEXT NOT NULL DEFAULT 'organizer',
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
   );
 
   CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_admin_id INTEGER NOT NULL DEFAULT 1,
+    owner_username TEXT NOT NULL DEFAULT 'admin',
+    owner_display_name TEXT NOT NULL DEFAULT '',
     slug TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
     event_date TEXT NOT NULL,
@@ -49,6 +53,7 @@ db.exec(`
     reg_end_at TEXT NOT NULL,
     max_participants INTEGER NOT NULL DEFAULT 0,
     is_active INTEGER NOT NULL DEFAULT 1,
+    event_status TEXT NOT NULL DEFAULT 'auto',
     banner_title TEXT NOT NULL DEFAULT '',
     banner_subtitle TEXT NOT NULL DEFAULT '',
     banner_image_url TEXT NOT NULL DEFAULT '',
@@ -84,6 +89,11 @@ db.exec(`
     price_breakdown_json TEXT NOT NULL DEFAULT '[]',
     total_amount INTEGER NOT NULL DEFAULT 0,
     payment_status TEXT NOT NULL DEFAULT '待繳費',
+    remittance_last5 TEXT NOT NULL DEFAULT '',
+    reg_type TEXT NOT NULL DEFAULT 'individual',
+    group_name TEXT NOT NULL DEFAULT '',
+    group_code TEXT NOT NULL DEFAULT '',
+    payment_mode TEXT NOT NULL DEFAULT 'individual',
     sheet_sync_status TEXT NOT NULL DEFAULT 'local',
     sheet_sync_error TEXT NOT NULL DEFAULT '',
     sheet_row_number INTEGER,
@@ -95,13 +105,18 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_registrations_reg_code ON registrations(reg_code);
 `);
 
-// 向下相容自動遷移：舊資料庫自動補齊 TUR 晶片串接欄位
+// 向下相容自動遷移：舊資料庫自動補齊欄位（多承辦人獨立隔離、活動三態、統一資料庫與晶片串接）
 function ensureColumn(table, column, definition) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all();
   if (!cols.some((c) => c.name === column)) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
   }
 }
+ensureColumn('admins', 'role', "TEXT NOT NULL DEFAULT 'organizer'");
+ensureColumn('events', 'owner_admin_id', 'INTEGER NOT NULL DEFAULT 1');
+ensureColumn('events', 'owner_username', "TEXT NOT NULL DEFAULT 'admin'");
+ensureColumn('events', 'owner_display_name', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('events', 'event_status', "TEXT NOT NULL DEFAULT 'auto'");
 ensureColumn('events', 'english_name', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('events', 'event_type', "TEXT NOT NULL DEFAULT 'distance'");
 ensureColumn('events', 'timing_event_id', "TEXT NOT NULL DEFAULT ''");
@@ -109,9 +124,18 @@ ensureColumn('events', 'timing_portal_url', "TEXT NOT NULL DEFAULT 'https://runc
 ensureColumn('events', 'timing_gas_url', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('registrations', 'bib_number', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('registrations', 'category_code', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('registrations', 'remittance_last5', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('registrations', 'reg_type', "TEXT NOT NULL DEFAULT 'individual'");
+ensureColumn('registrations', 'group_name', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('registrations', 'group_code', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('registrations', 'payment_mode', "TEXT NOT NULL DEFAULT 'individual'");
+
+db.exec('CREATE INDEX IF NOT EXISTS idx_events_owner_admin_id ON events(owner_admin_id);');
 
 /**
  * 路跑活動標準預設欄位範本（建立新活動時自動帶入）
+ * 預設欄位：姓名、性別、身份證字號、出生年月日、連絡電話、電子信箱、
+ * 緊急聯絡人姓名、報名組別、加購賽事服務、匯款帳號尾五碼、飲食習慣（葷/素）、備考、本次報名應繳總金額
  */
 function getDefaultRunningFields() {
   return [
@@ -142,11 +166,11 @@ function getDefaultRunningFields() {
     },
     {
       id: 'id_number',
-      label: '身分證字號 / 護照號碼',
+      label: '身份證字號 / 護照號碼',
       type: 'tw_id',
       required: true,
-      placeholder: '例如：A123456789 或外籍護照號碼',
-      helperText: '本國籍將自動驗證身分證格式；外籍選手請輸入有效護照號碼',
+      placeholder: '例如：A123456789 或外籍護照號碼（6~15 碼英數字）',
+      helperText: '本國籍將即時驗證身份證檢核碼；外籍選手請輸入護照號碼（公開顯示全面隱碼）',
       options: [],
       unitPrice: 0,
       validation: 'tw_id_or_passport',
@@ -157,40 +181,18 @@ function getDefaultRunningFields() {
       type: 'date',
       required: true,
       placeholder: '',
-      helperText: '將用於賽會保險投保、TUR 晶片成績與 DUV 國際認證',
+      helperText: '本活動限滿 16 歲以上報名，選擇後將即時計算實歲驗證',
       options: [],
       unitPrice: 0,
-      validation: 'none',
-    },
-    {
-      id: 'city',
-      label: '居住縣市',
-      type: 'text',
-      required: false,
-      placeholder: '例如：台北市、台中市、高雄市',
-      helperText: '選填；供晶片計時名單與 DUV 超馬成績登錄使用',
-      options: [],
-      unitPrice: 0,
-      validation: 'none',
-    },
-    {
-      id: 'country',
-      label: '國籍代碼',
-      type: 'text',
-      required: false,
-      placeholder: '例如：TPE（台灣）、JPN、USA',
-      helperText: '選填；預設 TPE（供雙語完賽證書與國際登錄使用）',
-      options: [],
-      unitPrice: 0,
-      validation: 'none',
+      validation: 'min_age_16',
     },
     {
       id: 'phone',
-      label: '聯絡電話',
+      label: '連絡電話',
       type: 'tel',
       required: true,
-      placeholder: '例如：0912-345678',
-      helperText: '賽前簡訊通知與報到物資領取將寄送至此號碼',
+      placeholder: '請輸入台灣手機 10 碼（例如：0912345678）',
+      helperText: '統一為台灣手機號碼 10 碼（09 開頭），供賽前通知與聯繫使用',
       options: [],
       unitPrice: 0,
       validation: 'phone',
@@ -201,7 +203,7 @@ function getDefaultRunningFields() {
       type: 'email',
       required: true,
       placeholder: 'runner@example.com',
-      helperText: '報名確認信與電子完賽證書將寄送至此信箱',
+      helperText: '報名完成確認信與繳費對帳通知將寄送至此信箱',
       options: [],
       unitPrice: 0,
       validation: 'email',
@@ -218,23 +220,12 @@ function getDefaultRunningFields() {
       validation: 'none',
     },
     {
-      id: 'emergency_phone',
-      label: '緊急聯絡人電話',
-      type: 'tel',
-      required: true,
-      placeholder: '例如：0988-765432',
-      helperText: '請勿填寫與參賽者本人相同之電話',
-      options: [],
-      unitPrice: 0,
-      validation: 'phone',
-    },
-    {
       id: 'race_category',
       label: '報名組別',
       type: 'select',
       required: true,
       placeholder: '請選擇參賽組別',
-      helperText: '費用包含賽道補給、TUR Web NFC 晶片計時、賽事紀念衫與中英文完賽證書',
+      helperText: '選擇組別後將自動計入本次報名應繳總金額',
       options: [
         { label: '超馬 50K', value: '超馬 50K', price: 1500, code: '50K', bibPrefix: 'A' },
         { label: '全馬 42K', value: '全馬 42K', price: 1200, code: '42K', bibPrefix: 'B' },
@@ -246,46 +237,63 @@ function getDefaultRunningFields() {
       validation: 'none',
     },
     {
-      id: 'shirt_size',
-      label: '紀念衫尺寸',
-      type: 'select',
-      required: true,
-      placeholder: '請選擇衣服尺寸',
-      helperText: '中性吸濕排汗機能版型，建議依平時穿著尺碼選擇',
+      id: 'addons',
+      label: '加購賽事服務',
+      type: 'checkbox',
+      required: false,
+      placeholder: '',
+      helperText: '可複選，勾選項目將自動累計至本次報名應繳總金額',
       options: [
-        { label: 'XS', value: 'XS', price: 0 },
-        { label: 'S', value: 'S', price: 0 },
-        { label: 'M', value: 'M', price: 0 },
-        { label: 'L', value: 'L', price: 0 },
-        { label: 'XL', value: 'XL', price: 0 },
-        { label: '2XL', value: '2XL', price: 0 },
-        { label: '3XL', value: '3XL', price: 0 },
+        { label: '疾速聯名防風外套', value: '疾速聯名防風外套', price: 680 },
+        { label: '完賽獎牌雷射刻字服務', value: '完賽獎牌雷射刻字服務', price: 150 },
+        { label: '賽日接駁專車', value: '賽日接駁專車', price: 200 },
       ],
       unitPrice: 0,
       validation: 'none',
     },
     {
-      id: 'addons',
-      label: '加購賽事裝備與服務（可複選）',
-      type: 'checkbox',
+      id: 'remittance_last5',
+      label: '匯款帳號尾五碼',
+      type: 'text',
       required: false,
+      placeholder: '請輸入 5 位數字（若尚未轉帳可先留空，完成匯款後可再查詢補填）',
+      helperText: '本系統無金流，填寫匯款帳號尾五碼可利承辦人核對帳務',
+      options: [],
+      unitPrice: 0,
+      validation: 'remittance_last5',
+    },
+    {
+      id: 'diet_preference',
+      label: '飲食習慣',
+      type: 'radio',
+      required: true,
       placeholder: '',
-      helperText: '勾選項目將自動累計至應繳總金額',
+      helperText: '供賽道與賽後餐點補給準備參考',
       options: [
-        { label: '疾速聯名防風外套', value: '疾速聯名防風外套', price: 680 },
-        { label: '完賽獎牌雷射刻字服務', value: '完賽獎牌雷射刻字服務', price: 150 },
-        { label: '賽日接駁專車（台北車站往返）', value: '賽日接駁專車', price: 200 },
+        { label: '葷', value: '葷', price: 0 },
+        { label: '素', value: '素', price: 0 },
       ],
       unitPrice: 0,
       validation: 'none',
     },
     {
       id: 'notes',
-      label: '特殊需求或備註',
+      label: '備考',
       type: 'textarea',
       required: false,
-      placeholder: '例如：素食補給需求、團報隊名或其他備註事項',
+      placeholder: '其他特殊需求或備註事項（選填）',
       helperText: '',
+      options: [],
+      unitPrice: 0,
+      validation: 'none',
+    },
+    {
+      id: 'calculated_total',
+      label: '本次報名應繳總金額',
+      type: 'calculated',
+      required: false,
+      placeholder: '',
+      helperText: '系統依上方選擇之「報名組別」與「加購賽事服務」自動加總計算',
       options: [],
       unitPrice: 0,
       validation: 'none',
@@ -298,18 +306,51 @@ function seedInitialData() {
   const adminUsername = process.env.ADMIN_USERNAME || 'admin';
   const adminPassword = process.env.ADMIN_PASSWORD || 'runner2026';
 
-  const existingAdmin = db.prepare('SELECT id FROM admins WHERE username = ?').get(adminUsername);
-  if (!existingAdmin) {
+  let defaultAdmin = db.prepare('SELECT * FROM admins WHERE username = ?').get(adminUsername);
+  if (!defaultAdmin) {
     const hash = bcrypt.hashSync(adminPassword, 10);
-    db.prepare('INSERT INTO admins (username, password_hash, display_name) VALUES (?, ?, ?)').run(
-      adminUsername,
-      hash,
-      '賽事總監 Admin'
-    );
-    console.log(`[Seed] 已建立預設管理員帳號：${adminUsername}`);
+    const info = db
+      .prepare('INSERT INTO admins (username, password_hash, display_name, role) VALUES (?, ?, ?, ?)')
+      .run(adminUsername, hash, 'TUR 賽事總監', 'super_admin');
+    defaultAdmin = db.prepare('SELECT * FROM admins WHERE id = ?').get(info.lastInsertRowid);
+    console.log(`[Seed] 已建立預設承辦管理帳號：${adminUsername}`);
+  } else if (!defaultAdmin.role || defaultAdmin.role === 'organizer') {
+    db.prepare("UPDATE admins SET role = 'super_admin' WHERE id = ?").run(defaultAdmin.id);
+    defaultAdmin.role = 'super_admin';
   }
 
-  // 2. 建立內建範例路跑活動
+  // 補齊舊活動缺漏的承辦人資訊
+  db.prepare(
+    `UPDATE events
+     SET owner_admin_id = ?, owner_username = ?, owner_display_name = ?
+     WHERE owner_admin_id IS NULL OR owner_admin_id = 0 OR owner_username = ''`
+  ).run(defaultAdmin.id, defaultAdmin.username, defaultAdmin.display_name);
+
+  // 補齊既有活動表單若尚未包含「匯款帳號後五碼」欄位
+  const existingEventsForFieldCheck = db.prepare('SELECT id, fields_json FROM events').all();
+  const remittanceFieldTemplate = getDefaultRunningFields().find((f) => f.id === 'remittance_last5');
+  for (const ev of existingEventsForFieldCheck) {
+    try {
+      const parsedFields = JSON.parse(ev.fields_json || '[]');
+      if (
+        Array.isArray(parsedFields) &&
+        remittanceFieldTemplate &&
+        !parsedFields.some((f) => f.id === 'remittance_last5' || String(f.label || '').includes('後五碼'))
+      ) {
+        const notesIdx = parsedFields.findIndex((f) => f.id === 'notes');
+        if (notesIdx !== -1) {
+          parsedFields.splice(notesIdx, 0, remittanceFieldTemplate);
+        } else {
+          parsedFields.push(remittanceFieldTemplate);
+        }
+        db.prepare('UPDATE events SET fields_json = ? WHERE id = ?').run(JSON.stringify(parsedFields), ev.id);
+      }
+    } catch (_) {
+      // ignore malformed json
+    }
+  }
+
+  // 2. 建立內建範例路跑活動（僅在全新空資料庫且非雲端待同步時建立）
   const existingEvents = db.prepare('SELECT COUNT(*) as cnt FROM events').get();
   if (existingEvents.cnt === 0) {
     const now = new Date();
@@ -330,12 +371,13 @@ function seedInitialData() {
 
     const insertEvent = db.prepare(`
       INSERT INTO events (
+        owner_admin_id, owner_username, owner_display_name,
         slug, name, english_name, event_type, timing_event_id, timing_portal_url, timing_gas_url,
         event_date, location, reg_start_at, reg_end_at,
-        max_participants, is_active, banner_title, banner_subtitle,
+        max_participants, is_active, event_status, banner_title, banner_subtitle,
         banner_image_url, description, payment_info,
         sheet_sync_mode, sheet_id, sheet_url, sheet_tab_name, gas_webhook_url, fields_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const rawMasterSheet = String(
@@ -343,12 +385,19 @@ function seedInitialData() {
     ).replace(/^["']+/, '').replace(/["',]+$/, '').trim();
     const masterMatch = rawMasterSheet.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
     const seedSheetId = masterMatch ? masterMatch[1] : rawMasterSheet;
-    const seedSheetMode = seedSheetId ? 'api' : 'local';
+    const masterGasUrl = String(process.env.GOOGLE_MASTER_GAS_URL || '')
+      .replace(/^["']+/, '')
+      .replace(/["',]+$/, '')
+      .trim();
+    const seedSheetMode = seedSheetId ? 'api' : masterGasUrl ? 'webhook' : 'local';
     const seedSheetUrl = seedSheetId
       ? `https://docs.google.com/spreadsheets/d/${seedSheetId}/edit`
       : '';
 
     const result = insertEvent.run(
+      defaultAdmin.id,
+      defaultAdmin.username,
+      defaultAdmin.display_name,
       'taipei-speed-marathon-2026',
       '2026 TUR 台灣超馬疾速城市挑戰賽',
       '2026 TUR TAIWAN ULTRA SPEED CHALLENGE',
@@ -362,16 +411,17 @@ function seedInitialData() {
       formatLocalISO(end),
       500,
       1,
+      'auto',
       '2026 TUR 台灣超馬疾速城市挑戰賽',
-      'Taiwan Ultra Runners 官方賽事｜Web NFC 晶片即時感應・超馬 50K / 全馬 42K / 半馬 21K / 10K 熱血徵召中',
+      'Taiwan Ultra Runners 官方賽事｜超馬 50K / 全馬 42K / 半馬 21K / 10K 熱血徵召中',
       'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&w=1600&q=80',
-      'TUR (Taiwan Ultra Runners) 年度指標性城市超級馬拉松與路跑盛會！支援共用 NFC 晶片感應計時、賽中即時里程排名與官方中英文雙語完賽證書，並可匯出 DUV 國際超馬認證成績。',
+      'TUR (Taiwan Ultra Runners) 年度指標性城市超級馬拉松與路跑盛會！支援即時報名與配號作業，歡迎各路跑者熱血挑戰。',
       '請於報名完成後 3 日內完成匯款，並於備註填寫「報名序號」：\n銀行代碼：822（中國信託）\n帳號：1234-5678-9012-3456\n戶名：TUR 台灣超級馬拉松跑者協會\n完成轉帳後將於 1-2 個工作天內完成對帳並開放參賽編號配號。',
       seedSheetMode,
       seedSheetId,
       seedSheetUrl,
       '2026 TUR 台灣超馬疾速城市挑戰賽',
-      '',
+      masterGasUrl,
       JSON.stringify(defaultFields)
     );
 

@@ -1,6 +1,11 @@
 import React from 'react';
-import { Calendar, MapPin, Users, Cpu, Radio } from 'lucide-react';
+import { Calendar, MapPin, Users, Clock, Radio, Building2 } from 'lucide-react';
 import CountdownTimer from './CountdownTimer';
+
+function formatDt(val) {
+  if (!val) return '';
+  return String(val).replace('T', ' ').slice(0, 16);
+}
 
 export default function BannerHero({ event, compact = false }) {
   const bgUrl =
@@ -10,7 +15,21 @@ export default function BannerHero({ event, compact = false }) {
   const count = Number(event?.registration_count || 0);
   const max = Number(event?.max_participants || 0);
   const ratio = max > 0 ? Math.min(100, Math.round((count / max) * 100)) : 0;
-  const isLapTimed = event?.event_type === 'lap_timed';
+  const status = event?.regState?.status || 'open';
+
+  const badgeClass =
+    status === 'open'
+      ? 'border-emerald-400/50 bg-emerald-500/20 text-emerald-300'
+      : status === 'preparing'
+      ? 'border-sky-400/50 bg-sky-500/20 text-sky-300'
+      : 'border-rose-400/50 bg-rose-500/20 text-rose-300';
+
+  const badgeText =
+    status === 'open'
+      ? '● 開放中'
+      : status === 'preparing'
+      ? '● 籌備中'
+      : `● 已結案${event?.regState?.subLabel ? `（${event.regState.subLabel}）` : ''}`;
 
   return (
     <section
@@ -18,7 +37,6 @@ export default function BannerHero({ event, compact = false }) {
         compact ? 'rounded-2xl border border-slate-700' : ''
       }`}
     >
-      {/* 背景圖片與 TUR 深海漸層遮罩 */}
       <div
         className="absolute inset-0 bg-cover bg-center scale-105"
         style={{ backgroundImage: `url("${bgUrl}")` }}
@@ -30,31 +48,19 @@ export default function BannerHero({ event, compact = false }) {
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-lime-400/40 bg-lime-500/15 px-3 py-1 text-xs font-extrabold tracking-wider text-lime-300">
             <Radio className="h-3.5 w-3.5 animate-pulse" />
-            TUR OFFICIAL REGISTRATION
-          </span>
-
-          <span className="inline-flex items-center gap-1 rounded-full border border-sky-400/40 bg-sky-500/15 px-3 py-1 text-xs font-bold text-sky-300">
-            <Cpu className="h-3.5 w-3.5" />
-            {isLapTimed ? '繞圈限時晶片賽 (Lap Timed)' : '標準距離晶片賽 (Distance)'}
+            線上活動報名
           </span>
 
           {event?.regState && (
-            <span
-              className={`rounded-full px-3 py-1 text-xs font-extrabold border ${
-                event.regState.status === 'open'
-                  ? 'border-emerald-400/50 bg-emerald-500/20 text-emerald-300'
-                  : event.regState.status === 'full'
-                  ? 'border-rose-400/50 bg-rose-500/20 text-rose-300'
-                  : 'border-amber-400/50 bg-amber-500/20 text-amber-300'
-              }`}
-            >
-              {event.regState.status === 'open'
-                ? '● 開放線上報名中'
-                : event.regState.status === 'full'
-                ? '● 名額已額滿'
-                : event.regState.status === 'upcoming'
-                ? '● 即將開放報名'
-                : '● 報名已截止 / 關閉'}
+            <span className={`rounded-full px-3 py-1 text-xs font-extrabold border ${badgeClass}`}>
+              {badgeText}
+            </span>
+          )}
+
+          {event?.organizer_name && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1 text-xs font-bold text-slate-300">
+              <Building2 className="h-3.5 w-3.5 text-slate-400" />
+              主辦：{event.organizer_name}
             </span>
           )}
         </div>
@@ -64,7 +70,7 @@ export default function BannerHero({ event, compact = false }) {
             compact ? 'text-2xl sm:text-3xl' : 'text-2xl sm:text-4xl lg:text-5xl'
           }`}
         >
-          {event?.banner_title || event?.name || 'TUR 路跑活動主標題'}
+          {event?.banner_title || event?.name || '路跑活動主標題'}
         </h1>
 
         {event?.english_name && (
@@ -74,7 +80,7 @@ export default function BannerHero({ event, compact = false }) {
         )}
 
         <p className={`mt-3 max-w-3xl text-slate-200 ${compact ? 'text-sm' : 'text-sm sm:text-base'}`}>
-          {event?.banner_subtitle || 'Taiwan Ultra Runners 官方賽事｜Web NFC 晶片計時與即時成績服務'}
+          {event?.banner_subtitle || '歡迎各位跑者熱血參與賽事活動'}
         </p>
 
         {/* 賽事關鍵資訊膠囊列 */}
@@ -86,9 +92,18 @@ export default function BannerHero({ event, compact = false }) {
               <strong className="font-mono-num text-white">{event.event_date}</strong>
             </div>
           )}
+          {(event?.reg_start_at || event?.reg_end_at) && (
+            <div className="flex items-center gap-2 rounded-xl bg-slate-900/85 px-3.5 py-2 border border-slate-700/80">
+              <Clock className="h-4 w-4 text-sky-400" />
+              <span>報名期間：</span>
+              <strong className="font-mono-num text-white">
+                {formatDt(event.reg_start_at) || '未定'} ~ {formatDt(event.reg_end_at) || '未定'}
+              </strong>
+            </div>
+          )}
           {event?.location && (
             <div className="flex items-center gap-2 rounded-xl bg-slate-900/85 px-3.5 py-2 border border-slate-700/80">
-              <MapPin className="h-4 w-4 text-sky-400" />
+              <MapPin className="h-4 w-4 text-emerald-400" />
               <span>{event.location}</span>
             </div>
           )}
@@ -112,10 +127,20 @@ export default function BannerHero({ event, compact = false }) {
           )}
         </div>
 
-        {/* 倒數計時器 */}
-        {!compact && event?.reg_end_at && (
+        {/* 依活動狀態顯示對應倒數計時器 */}
+        {!compact && status === 'open' && event?.reg_end_at && (
           <div className="mt-6">
-            <CountdownTimer targetIso={event.reg_end_at} label="距離報名截止" />
+            <CountdownTimer targetIso={event.reg_end_at} label="距離報名截止" expiredLabel="報名已截止" />
+          </div>
+        )}
+        {!compact && status === 'preparing' && event?.reg_start_at && (
+          <div className="mt-6">
+            <CountdownTimer
+              targetIso={event.reg_start_at}
+              label="距離開放報名"
+              expiredLabel="即將開放"
+              tone="sky"
+            />
           </div>
         )}
       </div>

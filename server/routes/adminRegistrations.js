@@ -2,11 +2,19 @@ const express = require('express');
 const { db } = require('../db');
 const { requireAdminAuth } = require('../middleware/auth');
 const {
+  getMasterDatabaseConfig,
   appendRegistrationToSheet,
   pullRowsFromSheet,
   updatePaymentStatusInSheet,
+  updateBibInSheet,
   buildExpectedHeaders,
 } = require('../services/googleSheets');
+const {
+  syncRegistrationToCloud,
+  syncAllRegistrationsToCloud,
+  syncEventToCloud,
+} = require('../services/cloudStore');
+const { sendRegistrationEmail } = require('../services/emailService');
 const { extractRunnerSummary } = require('../services/validation');
 const {
   maskIdNumber,
@@ -19,6 +27,29 @@ const {
 const router = express.Router();
 router.use(requireAdminAuth);
 
+function getOwnedEventOrDeny(req, res, eventId) {
+  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(Number(eventId));
+  if (!event) {
+    res.status(404).json({ error: '找不到指定的活動。' });
+    return null;
+  }
+  const me = db.prepare('SELECT id, username, role FROM admins WHERE id = ?').get(req.admin.id);
+  if (me?.role === 'super_admin') {
+    return event;
+  }
+  const isOwner =
+    Number(event.owner_admin_id) === Number(req.admin.id) ||
+    (event.owner_username && event.owner_username.toLowerCase() === String(req.admin.username || '').toLowerCase());
+  if (!isOwner) {
+    res.status(403).json({
+      error: '權限不足：此活動報名表屬於其他承辦人，僅建立者本人或最高權限管理者可檢視或修改報名資料。',
+      code: 'FORBIDDEN_NOT_OWNER',
+    });
+    return null;
+  }
+  return event;
+}
+
 function formatRegistrationRow(row) {
   return {
     ...row,
@@ -30,15 +61,12 @@ function formatRegistrationRow(row) {
 
 // GET /api/admin/events/:eventId/registrations
 router.get('/events/:eventId/registrations', (req, res) => {
-  const eventId = Number(req.params.eventId);
-  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
-  if (!event) {
-    return res.status(404).json({ error: '找不到指定的活動。' });
-  }
+  const event = getOwnedEventOrDeny(req, res, req.params.eventId);
+  if (!event) return;
 
   const rows = db
     .prepare('SELECT * FROM registrations WHERE event_id = ? ORDER BY created_at DESC, id DESC')
-    .all(eventId);
+    .all(event.id);
 
   return res.json({
     registrations: rows.map(formatRegistrationRow),
@@ -59,39 +87,119 @@ router.patch('/registrations/:id/payment-status', async (req, res) => {
     return res.status(404).json({ error: '找不到該筆報名紀錄。' });
   }
 
-  db.prepare('UPDATE registrations SET payment_status = ? WHERE id = ?').run(status, id);
-  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(reg.event_id);
+  const event = getOwnedEventOrDeny(req, res, reg.event_id);
+  if (!event) return;
 
-  // 雙向同步：同步回寫繳費狀態到 Google 試算表
+  db.prepare('UPDATE registrations SET payment_status = ? WHERE id = ?').run(status, id);
+  const updated = db.prepare('SELECT * FROM registrations WHERE id = ?').get(id);
+
+  // 1. 同步至統一資料庫 _DB_Registrations
+  await syncRegistrationToCloud(updated);
+
+  // 2. 同步回寫繳費狀態到活動專屬分頁
+  const master = getMasterDatabaseConfig();
   let sheetUpdate = { skipped: true };
-  if (event && event.sheet_sync_mode !== 'local') {
+  if (master.configured || event.sheet_sync_mode !== 'local') {
     sheetUpdate = await updatePaymentStatusInSheet(event, reg.reg_code, status);
   }
 
-  const updated = db.prepare('SELECT * FROM registrations WHERE id = ?').get(id);
+  // 3. 若承辦人改為「已繳費」或「已取消」，自動發送 Email 通知選手最新對帳狀態
+  let emailResult = { skipped: true };
+  if (status === '已繳費' || status === '已取消') {
+    const siteOrigin = `${req.protocol}://${req.get('host')}`;
+    emailResult = await sendRegistrationEmail({
+      type: 'payment_updated',
+      event,
+      registration: updated,
+      answers: JSON.parse(updated.answers_json || '{}'),
+      priceBreakdown: JSON.parse(updated.price_breakdown_json || '[]'),
+      siteOrigin,
+    });
+  }
+
   return res.json({
     registration: formatRegistrationRow(updated),
     sheetUpdate,
-    message: `已更新繳費狀態為「${status}」${sheetUpdate.synced ? '（已同步至試算表）' : ''}`,
+    emailNotification: emailResult,
+    message: `已更新繳費狀態為「${status}」${sheetUpdate.synced ? '（已同步至統一試算表）' : ''}${
+      emailResult.sent ? '，並已寄出 Email 通知選手！' : ''
+    }`,
+  });
+});
+
+// PATCH /api/admin/events/:eventId/groups/:groupCode/payment-status — 同團一鍵批量對帳（團體匯款核對專用）
+router.patch('/events/:eventId/groups/:groupCode/payment-status', async (req, res) => {
+  const event = getOwnedEventOrDeny(req, res, req.params.eventId);
+  if (!event) return;
+
+  const groupCode = String(req.params.groupCode || '').trim().toUpperCase();
+  const status = String(req.body?.payment_status || '').trim();
+  if (!['待繳費', '已繳費', '已取消'].includes(status)) {
+    return res.status(400).json({ error: '無效的繳費狀態。' });
+  }
+
+  const members = db
+    .prepare('SELECT * FROM registrations WHERE event_id = ? AND upper(group_code) = ?')
+    .all(event.id, groupCode);
+  if (members.length === 0) {
+    return res.status(404).json({ error: `找不到團報代碼「${groupCode}」的報名成員。` });
+  }
+
+  db.prepare(
+    'UPDATE registrations SET payment_status = ? WHERE event_id = ? AND upper(group_code) = ?'
+  ).run(status, event.id, groupCode);
+
+  const updatedMembers = db
+    .prepare('SELECT * FROM registrations WHERE event_id = ? AND upper(group_code) = ? ORDER BY id ASC')
+    .all(event.id, groupCode);
+
+  const master = getMasterDatabaseConfig();
+  const siteOrigin = `${req.protocol}://${req.get('host')}`;
+  let sentCount = 0;
+
+  for (const m of updatedMembers) {
+    if (master.configured || event.sheet_sync_mode !== 'local') {
+      await updatePaymentStatusInSheet(event, m.reg_code, status).catch(() => {});
+    }
+    if (status === '已繳費' || status === '已取消') {
+      const mailRes = await sendRegistrationEmail({
+        type: 'payment_updated',
+        event,
+        registration: m,
+        answers: JSON.parse(m.answers_json || '{}'),
+        priceBreakdown: JSON.parse(m.price_breakdown_json || '[]'),
+        siteOrigin,
+      });
+      if (mailRes.sent) sentCount += 1;
+    }
+  }
+
+  await syncAllRegistrationsToCloud();
+
+  return res.json({
+    groupCode,
+    updatedCount: updatedMembers.length,
+    registrations: updatedMembers.map(formatRegistrationRow),
+    message: `已將團體「${updatedMembers[0].group_name || groupCode}」共 ${updatedMembers.length} 位成員批次設為「${status}」${
+      sentCount > 0 ? `（已寄發 ${sentCount} 封通知信）` : ''
+    }！`,
   });
 });
 
 // POST /api/admin/events/:eventId/registrations/retry-sync
-// 將所有尚未同步或同步失敗的報名資料補寫回 Google 試算表
 router.post('/events/:eventId/registrations/retry-sync', async (req, res) => {
-  const eventId = Number(req.params.eventId);
-  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
-  if (!event) {
-    return res.status(404).json({ error: '找不到指定的活動。' });
-  }
-  if (event.sheet_sync_mode === 'local') {
-    return res.status(400).json({ error: '目前為本地展示模式，請先設定並儲存 Google 試算表同步模式。' });
+  const event = getOwnedEventOrDeny(req, res, req.params.eventId);
+  if (!event) return;
+
+  const master = getMasterDatabaseConfig();
+  if (!master.configured && event.sheet_sync_mode === 'local') {
+    return res.status(400).json({ error: '尚未設定平台統一 Google 試算表資料庫，無法補送同步。' });
   }
 
   const fields = JSON.parse(event.fields_json || '[]');
   const pendingRows = db
     .prepare("SELECT * FROM registrations WHERE event_id = ? AND sheet_sync_status != 'synced' ORDER BY id ASC")
-    .all(eventId);
+    .all(event.id);
 
   let successCount = 0;
   let failCount = 0;
@@ -114,7 +222,10 @@ router.post('/events/:eventId/registrations/retry-sync', async (req, res) => {
   }
 
   if (successCount > 0) {
-    db.prepare("UPDATE events SET last_sheet_sync_at = datetime('now', 'localtime') WHERE id = ?").run(eventId);
+    db.prepare("UPDATE events SET last_sheet_sync_at = datetime('now', 'localtime') WHERE id = ?").run(event.id);
+    const refreshedEvent = db.prepare('SELECT * FROM events WHERE id = ?').get(event.id);
+    await syncEventToCloud(refreshedEvent).catch(() => {});
+    await syncAllRegistrationsToCloud();
   }
 
   return res.json({
@@ -124,19 +235,15 @@ router.post('/events/:eventId/registrations/retry-sync', async (req, res) => {
     lastError: lastError || undefined,
     message:
       pendingRows.length === 0
-        ? '所有報名資料均已同步完成，無待補送項目。'
+        ? '所有報名資料均已同步至統一試算表，無待補送項目。'
         : `補送完成：成功 ${successCount} 筆，失敗 ${failCount} 筆。${lastError ? `（錯誤：${lastError}）` : ''}`,
   });
 });
 
 // POST /api/admin/events/:eventId/registrations/pull-from-sheet
-// 雙向同步：從 Google 試算表拉取最新修改（例如工作人員直接在試算表將繳費狀態改成「已繳費」，或手動加報）
 router.post('/events/:eventId/registrations/pull-from-sheet', async (req, res) => {
-  const eventId = Number(req.params.eventId);
-  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
-  if (!event) {
-    return res.status(404).json({ error: '找不到指定的活動。' });
-  }
+  const event = getOwnedEventOrDeny(req, res, req.params.eventId);
+  if (!event) return;
 
   const fields = JSON.parse(event.fields_json || '[]');
   try {
@@ -148,9 +255,9 @@ router.post('/events/:eventId/registrations/pull-from-sheet', async (req, res) =
       const data = item.data || {};
       const regCode = String(data['報名序號'] || '').trim();
       const paymentStatus = String(data['繳費狀態'] || '').trim();
+      const bibNumber = String(data['參賽編號'] || '').trim().toUpperCase();
       const totalAmount = Number(String(data['應繳總金額'] || '0').replace(/[^\d.-]/g, '')) || 0;
 
-      // 將表頭對應回欄位 ID
       const answers = {};
       for (const field of fields) {
         if (field.type === 'calculated') continue;
@@ -170,33 +277,34 @@ router.post('/events/:eventId/registrations/pull-from-sheet', async (req, res) =
       if (regCode) {
         const existing = db
           .prepare('SELECT * FROM registrations WHERE event_id = ? AND reg_code = ?')
-          .get(eventId, regCode);
+          .get(event.id, regCode);
         if (existing) {
           const nextStatus = paymentStatus || existing.payment_status;
+          const nextBib = bibNumber || existing.bib_number || '';
           db.prepare(
-            "UPDATE registrations SET payment_status = ?, sheet_sync_status = 'synced', sheet_row_number = ? WHERE id = ?"
-          ).run(nextStatus, item.rowNumber, existing.id);
+            "UPDATE registrations SET payment_status = ?, bib_number = ?, sheet_sync_status = 'synced', sheet_row_number = ? WHERE id = ?"
+          ).run(nextStatus, nextBib, item.rowNumber, existing.id);
           updatedCount += 1;
           continue;
         }
       }
 
-      // 若試算表中有手動新增的列，一併匯入本地資料庫
       const summary = extractRunnerSummary(fields, answers);
       if (!summary.runnerName && !regCode) continue;
 
       const generatedCode =
-        regCode || `SHEET-${eventId}-${item.rowNumber}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+        regCode || `SHEET-${event.id}-${item.rowNumber}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
 
       db.prepare(`
         INSERT INTO registrations (
-          event_id, reg_code, runner_name, runner_id_number, runner_email, runner_phone,
+          event_id, reg_code, bib_number, runner_name, runner_id_number, runner_email, runner_phone,
           answers_json, price_breakdown_json, total_amount, payment_status,
           sheet_sync_status, sheet_row_number
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', ?)
       `).run(
-        eventId,
+        event.id,
         generatedCode,
+        bibNumber,
         summary.runnerName || '試算表匯入跑者',
         summary.runnerIdNumber,
         summary.runnerEmail,
@@ -210,7 +318,10 @@ router.post('/events/:eventId/registrations/pull-from-sheet', async (req, res) =
       importedCount += 1;
     }
 
-    db.prepare("UPDATE events SET last_sheet_sync_at = datetime('now', 'localtime') WHERE id = ?").run(eventId);
+    db.prepare("UPDATE events SET last_sheet_sync_at = datetime('now', 'localtime') WHERE id = ?").run(event.id);
+    const refreshedEvent = db.prepare('SELECT * FROM events WHERE id = ?').get(event.id);
+    await syncEventToCloud(refreshedEvent).catch(() => {});
+    await syncAllRegistrationsToCloud();
 
     return res.json({
       totalSheetRows: pulled.rows.length,
@@ -225,17 +336,14 @@ router.post('/events/:eventId/registrations/pull-from-sheet', async (req, res) =
 
 // GET /api/admin/events/:eventId/registrations/export-csv
 router.get('/events/:eventId/registrations/export-csv', (req, res) => {
-  const eventId = Number(req.params.eventId);
-  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
-  if (!event) {
-    return res.status(404).json({ error: '找不到指定的活動。' });
-  }
+  const event = getOwnedEventOrDeny(req, res, req.params.eventId);
+  if (!event) return;
 
   const fields = JSON.parse(event.fields_json || '[]');
   const headers = buildExpectedHeaders(fields);
   const rows = db
     .prepare('SELECT * FROM registrations WHERE event_id = ? ORDER BY id ASC')
-    .all(eventId);
+    .all(event.id);
 
   const escapeCsv = (val) => {
     const str = val === undefined || val === null ? '' : String(val);
@@ -250,21 +358,25 @@ router.get('/events/:eventId/registrations/export-csv', (req, res) => {
     const answers = JSON.parse(reg.answers_json || '{}');
     const rowMap = {
       '報名序號': reg.reg_code,
+      '報名類型': reg.reg_type === 'group' ? '團體報名' : '個人報名',
+      '團體名稱': reg.group_name || '',
+      '團報代碼': reg.group_code || '',
       '參賽編號': reg.bib_number || '',
       '分組代碼': reg.category_code || '',
       '報名時間': reg.created_at,
       '應繳總金額': reg.total_amount,
+      '匯款方式': reg.payment_mode === 'group' ? '團體匯款' : '個別匯款',
+      '匯款後五碼': reg.remittance_last5 || '',
       '繳費狀態': reg.payment_status,
     };
     for (const f of fields) {
       if (f.type === 'calculated') continue;
       const val = answers[f.id];
-      rowMap[String(f.label || f.id).trim()] = Array.isArray(val) ? val.join('、') : (val ?? '');
+      rowMap[String(f.label || f.id).trim()] = Array.isArray(val) ? val.join('、') : val ?? '';
     }
     lines.push(headers.map((h) => escapeCsv(rowMap[h])).join(','));
   }
 
-  // 加入 UTF-8 BOM 確保 Excel 直接開啟中文不亂碼
   const csvContent = '\uFEFF' + lines.join('\r\n');
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader(
@@ -275,12 +387,16 @@ router.get('/events/:eventId/registrations/export-csv', (req, res) => {
 });
 
 // PATCH /api/admin/registrations/:id/bib — 手動修改參賽編號（號碼布）與晶片分組代碼
-router.patch('/registrations/:id/bib', (req, res) => {
+router.patch('/registrations/:id/bib', async (req, res) => {
   const id = Number(req.params.id);
   const reg = db.prepare('SELECT * FROM registrations WHERE id = ?').get(id);
   if (!reg) {
     return res.status(404).json({ error: '找不到該筆報名紀錄。' });
   }
+
+  const event = getOwnedEventOrDeny(req, res, reg.event_id);
+  if (!event) return;
+
   const bib = String(req.body?.bib_number ?? reg.bib_number ?? '').trim().toUpperCase();
   const cat = String(req.body?.category_code ?? reg.category_code ?? '').trim();
 
@@ -297,6 +413,10 @@ router.patch('/registrations/:id/bib', (req, res) => {
 
   db.prepare('UPDATE registrations SET bib_number = ?, category_code = ? WHERE id = ?').run(bib, cat, id);
   const updated = db.prepare('SELECT * FROM registrations WHERE id = ?').get(id);
+
+  await syncRegistrationToCloud(updated);
+  await updateBibInSheet(event, updated.reg_code, bib, cat).catch(() => {});
+
   return res.json({
     registration: formatRegistrationRow(updated),
     message: bib ? `已更新參賽編號為 ${bib}` : '已清除參賽編號',
@@ -304,12 +424,10 @@ router.patch('/registrations/:id/bib', (req, res) => {
 });
 
 // POST /api/admin/events/:eventId/registrations/auto-assign-bibs — 依報名組別一鍵自動配號
-router.post('/events/:eventId/registrations/auto-assign-bibs', (req, res) => {
-  const eventId = Number(req.params.eventId);
-  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
-  if (!event) {
-    return res.status(404).json({ error: '找不到指定的活動。' });
-  }
+router.post('/events/:eventId/registrations/auto-assign-bibs', async (req, res) => {
+  const event = getOwnedEventOrDeny(req, res, req.params.eventId);
+  if (!event) return;
+
   const fields = JSON.parse(event.fields_json || '[]');
   const paidOnly = Boolean(req.body?.paidOnly);
   const overwrite = Boolean(req.body?.overwrite);
@@ -317,7 +435,11 @@ router.post('/events/:eventId/registrations/auto-assign-bibs', (req, res) => {
   const result = autoAssignBibNumbers(db, event, fields, { paidOnly, overwrite });
   const rows = db
     .prepare('SELECT * FROM registrations WHERE event_id = ? ORDER BY created_at DESC, id DESC')
-    .all(eventId);
+    .all(event.id);
+
+  if (result.assignedCount > 0) {
+    await syncAllRegistrationsToCloud();
+  }
 
   return res.json({
     ...result,
@@ -329,19 +451,17 @@ router.post('/events/:eventId/registrations/auto-assign-bibs', (req, res) => {
   });
 });
 
-// GET /api/admin/events/:eventId/registrations/export-chip-csv — 匯出 TUR 晶片系統專用名單 CSV
+// GET /api/admin/events/:eventId/registrations/export-chip-csv — 匯出晶片系統專用名單 CSV
 router.get('/events/:eventId/registrations/export-chip-csv', (req, res) => {
-  const eventId = Number(req.params.eventId);
-  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
-  if (!event) {
-    return res.status(404).json({ error: '找不到指定的活動。' });
-  }
+  const event = getOwnedEventOrDeny(req, res, req.params.eventId);
+  if (!event) return;
+
   const paidOnly = String(req.query.paidOnly || '').toLowerCase() === 'true';
   const fields = JSON.parse(event.fields_json || '[]');
   const sql = paidOnly
     ? "SELECT * FROM registrations WHERE event_id = ? AND payment_status = '已繳費' ORDER BY id ASC"
     : 'SELECT * FROM registrations WHERE event_id = ? ORDER BY id ASC';
-  const rows = db.prepare(sql).all(eventId);
+  const rows = db.prepare(sql).all(event.id);
 
   const csvContent = buildChipImportCsv(event, fields, rows);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -352,19 +472,17 @@ router.get('/events/:eventId/registrations/export-chip-csv', (req, res) => {
   return res.send(csvContent);
 });
 
-// GET /api/admin/events/:eventId/registrations/chip-preview — 預覽 TUR 晶片系統標準 JSON 格式
+// GET /api/admin/events/:eventId/registrations/chip-preview
 router.get('/events/:eventId/registrations/chip-preview', (req, res) => {
-  const eventId = Number(req.params.eventId);
-  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
-  if (!event) {
-    return res.status(404).json({ error: '找不到指定的活動。' });
-  }
+  const event = getOwnedEventOrDeny(req, res, req.params.eventId);
+  if (!event) return;
+
   const paidOnly = String(req.query.paidOnly || '').toLowerCase() === 'true';
   const fields = JSON.parse(event.fields_json || '[]');
   const sql = paidOnly
     ? "SELECT * FROM registrations WHERE event_id = ? AND payment_status = '已繳費' ORDER BY id ASC"
     : 'SELECT * FROM registrations WHERE event_id = ? ORDER BY id ASC';
-  const rows = db.prepare(sql).all(eventId);
+  const rows = db.prepare(sql).all(event.id);
 
   return res.json({
     eventId: event.timing_event_id || event.slug,
@@ -373,19 +491,17 @@ router.get('/events/:eventId/registrations/chip-preview', (req, res) => {
   });
 });
 
-// POST /api/admin/events/:eventId/registrations/push-to-chip — 一鍵推送名單至獨立的 TUR 晶片計時系統
+// POST /api/admin/events/:eventId/registrations/push-to-chip
 router.post('/events/:eventId/registrations/push-to-chip', async (req, res) => {
-  const eventId = Number(req.params.eventId);
-  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
-  if (!event) {
-    return res.status(404).json({ error: '找不到指定的活動。' });
-  }
+  const event = getOwnedEventOrDeny(req, res, req.params.eventId);
+  if (!event) return;
+
   const paidOnly = req.body?.paidOnly !== false;
   const fields = JSON.parse(event.fields_json || '[]');
   const sql = paidOnly
     ? "SELECT * FROM registrations WHERE event_id = ? AND payment_status = '已繳費' ORDER BY id ASC"
     : 'SELECT * FROM registrations WHERE event_id = ? ORDER BY id ASC';
-  const rows = db.prepare(sql).all(eventId);
+  const rows = db.prepare(sql).all(event.id);
 
   try {
     const result = await pushRosterToChipSystem(event, fields, rows, {
@@ -395,7 +511,7 @@ router.post('/events/:eventId/registrations/push-to-chip', async (req, res) => {
     });
     return res.json({
       ...result,
-      message: `已成功將 ${result.pushedCount} 位跑者名單推送至 TUR 晶片計時系統（獨立資料庫同步完成）！`,
+      message: `已成功將 ${result.pushedCount} 位跑者名單推送至晶片計時系統！`,
     });
   } catch (err) {
     return res.status(400).json({ error: err.message });

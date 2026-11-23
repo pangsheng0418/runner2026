@@ -4,10 +4,13 @@ const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
 const { UPLOADS_DIR } = require('./db');
+const { ensureCloudSynced, getCloudSyncStatus } = require('./services/cloudStore');
 
 const authRoutes = require('./routes/auth');
 const adminEventRoutes = require('./routes/adminEvents');
 const adminRegistrationRoutes = require('./routes/adminRegistrations');
+const adminUserRoutes = require('./routes/adminUsers');
+const adminDataRoutes = require('./routes/adminData');
 const publicRoutes = require('./routes/public');
 const integrationRoutes = require('./routes/integration');
 
@@ -22,16 +25,32 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 // 健康檢查
-app.get('/api/health', (_req, res) => {
+app.get('/api/health', async (_req, res) => {
+  const syncRes = await ensureCloudSynced();
   res.json({
     ok: true,
-    service: 'TUR (Taiwan Ultra Runners) 路跑活動線上報名與管理平台',
+    service: 'TUR 路跑活動線上報名平台（統一雲端資料庫架構）',
+    cloudDatabase: getCloudSyncStatus(),
+    syncCheck: syncRes,
     timestamp: new Date().toISOString(),
   });
 });
 
+// 統一雲端資料庫自動同步 Middleware（確保網路版 / Vercel Serverless 實例始終指向同一資料庫）
+app.use('/api', async (req, _res, next) => {
+  if (req.path === '/health') return next();
+  try {
+    await ensureCloudSynced();
+  } catch (err) {
+    console.warn('[CloudSync Middleware]', err.message);
+  }
+  return next();
+});
+
 // API 路由
 app.use('/api/auth', authRoutes);
+app.use('/api/admin/users', adminUserRoutes);
+app.use('/api/admin/data', adminDataRoutes);
 app.use('/api/admin/events', adminEventRoutes);
 app.use('/api/admin', adminRegistrationRoutes);
 app.use('/api/public', publicRoutes);
@@ -59,11 +78,13 @@ app.use((err, _req, res, _next) => {
 
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`\n🏃 RunFlow 路跑活動報名管理平台已啟動！`);
-    console.log(`   ▶ 前台首頁：http://localhost:${PORT}`);
-    console.log(`   ▶ 範例活動：http://localhost:${PORT}/register/taipei-speed-marathon-2026`);
-    console.log(`   ▶ 後台管理：http://localhost:${PORT}/admin/login`);
-    console.log(`   ▶ 預設帳號：${process.env.ADMIN_USERNAME || 'admin'} / ${process.env.ADMIN_PASSWORD || 'runner2026'}\n`);
+    const dbStatus = getCloudSyncStatus();
+    console.log(`\n🏃 TUR 路跑活動線上報名平台已啟動！`);
+    console.log(`   ▶ 前台報名平台：http://localhost:${PORT}`);
+    console.log(`   ▶ 承辦人獨立入口：http://localhost:${PORT}/admin/login`);
+    console.log(
+      `   ▶ 統一雲端資料庫：${dbStatus.configured ? `已連線（${dbStatus.mode.toUpperCase()} 模式）` : '尚未設定（請於 .env 設定 GOOGLE_MASTER_SHEET_ID 或 GOOGLE_MASTER_GAS_URL）'}\n`
+    );
   });
 }
 

@@ -51,15 +51,64 @@ function isValidTaiwanIdOrPassport(raw) {
   };
 }
 
+const MIN_REGISTRATION_AGE = 16;
+
 function isValidEmail(raw) {
   const value = String(raw || '').trim();
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  if (/\s/.test(value)) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value);
 }
 
 function isValidPhone(raw) {
   const digits = String(raw || '').replace(/[\s\-()]/g, '');
-  // 台灣手機 (09xxxxxxxx) 或市話/國際碼 (8~15 碼數字，允許開頭 +)
-  return /^\+?\d{8,15}$/.test(digits);
+  // 連絡電話統一為台灣手機 10 碼（09 開頭共 10 碼純數字）
+  return /^09\d{8}$/.test(digits);
+}
+
+function calculateAge(birthDateStr, referenceDate = new Date()) {
+  const s = String(birthDateStr || '').trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const dob = new Date(year, month - 1, day);
+  if (
+    Number.isNaN(dob.getTime()) ||
+    dob.getFullYear() !== year ||
+    dob.getMonth() !== month - 1 ||
+    dob.getDate() !== day
+  ) {
+    return null;
+  }
+  let age = referenceDate.getFullYear() - year;
+  const monthDiff = referenceDate.getMonth() + 1 - month;
+  if (monthDiff < 0 || (monthDiff === 0 && referenceDate.getDate() < day)) {
+    age -= 1;
+  }
+  return age;
+}
+
+function validateBirthDateAge(raw, minAge = MIN_REGISTRATION_AGE) {
+  const age = calculateAge(raw);
+  if (age === null) {
+    return { valid: false, message: '請選擇有效的出生年月日' };
+  }
+  if (age < 0 || age > 120) {
+    return { valid: false, message: '出生年月日不合理，請重新確認' };
+  }
+  if (age < minAge) {
+    return {
+      valid: false,
+      message: `本活動限滿 ${minAge} 歲以上報名（目前實歲 ${age} 歲，不符報名資格）`,
+    };
+  }
+  return { valid: true, age };
+}
+
+function isValidRemittanceLast5(raw) {
+  const value = String(raw || '').trim();
+  return /^\d{5}$/.test(value);
 }
 
 /**
@@ -136,7 +185,26 @@ function validateAndCalculateRegistration(fields, rawAnswers) {
 
     if (field.type === 'tel' || field.validation === 'phone') {
       if (!isValidPhone(strVal)) {
-        errors[field.id] = '請輸入正確的聯絡電話（例如 0912-345678）';
+        errors[field.id] = '連絡電話統一為台灣手機 10 碼（09 開頭共 10 碼，例如 0912345678）';
+        continue;
+      }
+    }
+
+    if (
+      field.id === 'birth_date' ||
+      field.validation === 'min_age_16' ||
+      (field.type === 'date' && String(field.label || '').includes('出生'))
+    ) {
+      const ageCheck = validateBirthDateAge(strVal, MIN_REGISTRATION_AGE);
+      if (!ageCheck.valid) {
+        errors[field.id] = ageCheck.message;
+        continue;
+      }
+    }
+
+    if (field.id === 'remittance_last5' || field.validation === 'remittance_last5') {
+      if (!isValidRemittanceLast5(strVal)) {
+        errors[field.id] = '匯款帳號尾五碼需為 5 位純數字（例如 12345）';
         continue;
       }
     }
@@ -222,9 +290,10 @@ function extractRunnerSummary(fields, cleanAnswers) {
 
   return {
     runnerName: findByKeys(['full_name', 'name'], ['姓名']),
-    runnerIdNumber: findByKeys(['id_number', 'tw_id'], ['身分證', '護照']),
+    runnerIdNumber: findByKeys(['id_number', 'tw_id'], ['身份證', '身分證', '護照']),
     runnerEmail: findByKeys(['email'], ['信箱', 'Email', 'email']),
-    runnerPhone: findByKeys(['phone', 'mobile'], ['聯絡電話', '手機', '電話']),
+    runnerPhone: findByKeys(['phone', 'mobile'], ['連絡電話', '聯絡電話', '手機', '電話']),
+    remittanceLast5: findByKeys(['remittance_last5'], ['尾五碼', '後五碼', '匯款帳號']),
   };
 }
 
@@ -233,6 +302,7 @@ module.exports = {
   isValidTaiwanIdOrPassport,
   isValidEmail,
   isValidPhone,
+  isValidRemittanceLast5,
   validateAndCalculateRegistration,
   extractRunnerSummary,
 };

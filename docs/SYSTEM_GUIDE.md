@@ -1,233 +1,183 @@
-# TUR (Taiwan Ultra Runners) 路跑活動線上報名與管理平台 — 完整使用與技術說明書
+# TUR 路跑活動線上報名與管理平台｜完整系統說明書
 
-> 適用版本：v2.0（TUR 官方視覺版 + 獨立資料庫晶片系統對接版）  
-> 搭配計時平台：[TUR 晶片計時平台](https://runchip-timing.vercel.app/)
+> 最後修訂日期：2026-11-23  
+> 適用架構：網路版全端架構（React + Vite + Express + 統一單一 Google 試算表雲端資料庫）
 
 ---
 
-## 一、系統總覽與核心特色
+## 1. 系統定位與核心特色
 
-本平台專為 **TUR (Taiwan Ultra Runners)** 打造，提供從「活動發起、動態報名表單、即時費用加總、Google 試算表雙向同步」到「自動配號與晶片計時系統名單對接」的一條龍流程。
+本系統為**獨立運作的路跑活動線上報名與管理平台**，專為網路部署（如 Vercel）與多承辦人協作設計。
 
-| 核心面向 | 功能亮點 |
+- **純粹獨立報名平台**：首頁無「公開報名 / 晶片計時」等混淆入口，頂部僅保留「報名查詢／修改」與「後台管理」。
+- **首頁只列開放中賽事**：按賽事「**月份（YYYY 年 MM 月）**」條列呈現，支援月份快篩、關鍵字搜尋與同畫面展開詳細摘要；首頁**不對外顯示名額**。
+- **多承辦人分層權限**：
+  - **一般承辦人**：只能檢視、修改自己建立的活動報名表，彼此資料完全隔離。
+  - **最高權限承辦人（系統總管）**：可管理全平台所有活動、修改所有承辦人權限資料，並操作資料載入／備份／清空。
+- **統一單一 Google 試算表資料庫**：比照晶片管理系統模式，全平台共用「**同一份**」Google 試算表，建立新活動免重複貼試算表連結。
+- **無金流對帳友善流程**：支援**個人報名／團體報名（可命名）**、**個別匯款／團體匯款記註帳號尾五碼**、**Email 自動回覆通知**與**選手雙因子反向查詢改報**。
+
+---
+
+## 2. 權限角色與作業範圍對照表
+
+| 角色等級 | 帳號角色代碼 | 活動存取權限 | 承辦人與權限管理 | 資料載入 / 備份 / 清空 |
+| :--- | :--- | :--- | :---: | :---: |
+| **一般承辦人** | `organizer` | 僅可新建並管理**自己建立的活動**與名單（跨權存取一律 `403` 攔截） | 不可使用 | 不可使用 |
+| **最高權限承辦人** | `super_admin` | 可管理**全平台全部承辦人**的活動、移轉活動歸屬、批次對帳 | **完整開放**（新增、改名、升降權限、重設密碼、刪除） | **完整開放** |
+
+> **安全防呆**：系統至少保留 1 位最高權限承辦人，禁止將最後一位總管降級或刪除目前登入中的總管帳號。
+
+---
+
+## 3. 前台選手使用指南
+
+### 3.1 首頁瀏覽（`/`）
+1. 進入首頁即列出全平台所有「**開放中**」的賽事（籌備中與已結案活動僅於後台顯示）。
+2. 依賽事日期由近至遠，自動按「**YYYY 年 MM 月**」分組條列，頂部提供月份快速篩選膠囊。
+3. 每一列即時顯示：賽事日期方塊、縮圖、主辦單位、一句摘要、地點、報名起訖時間、組別標籤。
+4. 點擊「**詳細摘要**」可於同畫面展開完整簡介與各組別費用；點擊「**立即報名**」進入填表。
+
+### 3.2 個人報名與團體報名（`/register/:slug`）
+
+| 報名類型 | 適用情境 | 支援匯款方式與尾五碼記註 |
+| :--- | :--- | :--- |
+| **個人報名** | 單人自行填報 | • **個別匯款**：本人轉帳，填寫個人匯款尾五碼<br>• **團體匯款**：由跑團代匯，可填寫所屬團體名稱與團體尾五碼 |
+| **團體報名（可命名）** | 團長一次幫多位跑友報名（最多單次 50 人） | • 自由命名「**團體名稱**」，系統自動配發共用「**團報代碼**（如 `GRP26-XXXX`）」<br>• **團體匯款**：上方填寫 1 組尾五碼即自動套用全團<br>• **個別匯款**：每位團員卡片各自填寫個人尾五碼 |
+
+### 3.3 預設報名表 13 項標準欄位與「輸入當下即時檢核」
+
+以下檢核皆於**輸入當下（`onChange` / `onBlur`）立即顯示**紅框錯誤或綠框驗證通過，不必等到按送出才發現填錯（後端送出時亦同步二次把關）：
+
+| 順序 | 欄位名稱 | 必填 | 即時檢核規則 |
+| :---: | :--- | :---: | :--- |
+| 1 | **姓名** | 必填 | 不可為空 |
+| 2 | **性別** | 必填 | 單選：男 ／ 女（團報各成員獨立勾選不衝突） |
+| 3 | **身份證字號 / 護照號碼** | 必填 | 台灣身分證須為 10 碼且通過官方權重檢核碼；外籍護照須為 6～15 碼英數字（含數字） |
+| 4 | **出生年月日** | 必填 | **限滿 16 歲以上報名**，依年月日即時計算實歲；未滿 16 歲立即警示阻擋 |
+| 5 | **連絡電話** | 必填 | **統一台灣手機 10 碼**（`09` 開頭共 10 碼純數字），碼數不符立即顯示目前碼數 |
+| 6 | **電子信箱** | 必填 | 標準 Email 格式檢核（不可含空白，須具完整網域） |
+| 7 | **緊急聯絡人姓名** | 必填 | 不可為空 |
+| 8 | **報名組別** | 必填 | 下拉選單（含組別費用，選擇後即時累加總金額） |
+| 9 | **加購賽事服務** | 選填 | 多選項目（勾選後即時累加總金額） |
+| 10 | **匯款帳號尾五碼** | 選填 | 有填寫時即時檢核須為 **5 位純數字**；尚未轉帳可先留空，日後反向查詢補填 |
+| 11 | **飲食習慣** | 必填 | 單選：**葷** ／ **素** |
+| 12 | **備考** | 選填 | 多行文字備註 |
+| 13 | **本次報名應繳總金額** | 自動 | 依報名組別與加購賽事服務即時試算呈現 |
+
+### 3.4 Email 自動回覆通知
+- **報名完成**：自動寄送「【報名成功確認信】」，內含專屬報名序號、應繳總金額、匯款方式與尾五碼、匯款帳戶資訊與「一鍵反向查詢修改連結」。
+- **選手改報／補填尾五碼**：自動寄送「【報名資料更新確認】」信件。
+- **承辦人核帳完成**：承辦人將繳費狀態改為「已繳費」或「已取消」時，自動寄送「【繳費狀態更新通知】」信件。
+
+### 3.5 選手反向查詢與改報資料（`/lookup` 或活動頁「反向查詢」分頁）
+1. **雙因子身分驗證**：輸入「**身份證字號 / 護照號碼**」搭配「**報名序號**」或「**電子信箱**」即可安全查詢。
+2. **修改權限規則**：
+   - **待繳費**：可自由修改個人資料、組別與加購項目（即時重算總金額）、切換匯款方式及補填／更正匯款帳號尾五碼。
+   - **已繳費**：自動鎖定會影響應繳金額的組別與加購項目，但仍可修改聯絡電話、飲食習慣、備考等基本資料。
+   - **已結案活動／已取消報名**：僅供查詢歷史狀況，不開放線上修改。
+
+---
+
+## 4. 後台承辦人與總管操作指南（`/admin`）
+
+### 4.1 報名表三態控制與起始日期
+承辦人可於後台隨時設定每個報名表的狀態與報名起訖日期時間：
+
+| 報名表狀態 | 前台首頁顯示 | 允許線上報名 | 說明 |
+| :--- | :---: | :---: | :--- |
+| **自動（依日期）** | 依時間自動切換 | 期間內開放 | 未到報名開始日為「籌備中」→ 期間內為「開放中」→ 截止或額滿為「已結案」 |
+| **開放中** | **顯示於首頁** | 開放 | 立即上架首頁接受選手個人／團體報名 |
+| **籌備中** | 不顯示於首頁 | 關閉 | 承辦人籌備編輯中，直接開網址會顯示倒數開放提示 |
+| **已結案** | 不顯示於首頁 | 關閉 | 賽事已截止或結束，僅保留後台名單供查帳與匯出 |
+
+### 4.2 報名名單對帳與批次操作
+- 名單表格完整顯示：參賽編號（Bib）、報名序號與團報標籤（個人 / 團報名稱）、隱碼證號、組別、金額、**匯款方式（個別匯款／團體匯款）與尾五碼**、繳費狀態。
+- 搜尋欄支援直接輸入 **團體名稱、團報代碼、匯款尾五碼、姓名、序號、電話** 快速查帳。
+- **整團一鍵對帳**：針對團報成員，點擊「**整團設已繳費**」即可一次完成全團對帳並寄發通知信。
+- 支援**一鍵自動配號（Bib）**、**匯出完整名單 CSV** 與 **匯出晶片計時專用 CSV**。
+
+### 4.3 最高權限專屬：承辦人與權限管理
+- 切換至頂部「**承辦人與權限管理**」分頁。
+- 支援新增承辦人帳號、修改承辦單位名稱、切換權限（一般承辦人 ↔ 最高權限承辦人）、重設密碼與刪除帳號（刪除時名下活動自動移交給總管保管，不遺失資料）。
+- 在各活動「基本設定與狀態」中，最高權限亦可直接移轉該活動的「歸屬承辦人」。
+
+### 4.4 最高權限專屬：資料管理與備份中心
+切換至頂部「**資料管理與備份**」分頁，提供三大工具：
+1. **一鍵載入測試資料**：自動建立測試承辦人（`org_north`、`org_south`）、4 場三態賽事與 9 筆範例跑者。
+2. **資料完整備份與還原**：下載全平台 `.json` 完整備份檔（含承辦人、活動設定、表單與報名名單）；隨時可上傳備份檔一鍵 100% 還原並同步至雲端。
+3. **資料清空（防呆需輸入 `CLEAR`）**：可選擇「僅清空報名名單（保留活動設定）」或「清空全平台活動與報名資料（可選是否清除其他一般承辦人，永遠保留目前登入的最高權限帳號）」。
+
+---
+
+## 5. 統一單一 Google 試算表資料庫與網路部署設定
+
+### 5.1 統一試算表自動分頁架構
+
+全平台只需準備**唯一一份 Google 試算表**，系統會自動維護以下分頁（所有網路實例與 Vercel Serverless 冷啟動自動同步）：
+
+| 分頁名稱 | 作用 |
 | :--- | :--- |
-| **TUR 官方視覺設計** | 內嵌官方 `TUR (Taiwan Ultra Runners)` Logo、深邃夜空 36px 細網格背景、萊姆綠 / 天空藍 / 琥珀金三色光暈，並支援**戶外強光高對比模式**（黑底黃框）。 |
-| **響應式設計（RWD）** | 電腦與手機皆能流暢操作；手機報名頁自動啟用底部固定金額結帳條。 |
-| **動態表單設計器** | 內建 14 項 TUR 路跑標準欄位，支援拖曳排序、增刪改、11 種欄位格式、選項計價自動加總，以及組別對應**晶片代碼與配號前綴**。 |
-| **Google 試算表雙向同步** | 支援 **Google Sheets API（Service Account）** 與 **GAS Webhook** 雙模式；自動建立活動專屬工作表分頁、同步表頭、即時寫入與雙向拉取。 |
-| **獨立資料庫 × 晶片對接** | 與 [TUR 晶片計時系統](https://runchip-timing.vercel.app/) 各自維護獨立資料庫，互不耦合；透過「自動配號 + 專用 CSV」、「GAS 推送」或「跨系統 JSON API」無縫交換名單。 |
-| **個資安全與防呆** | 台灣身分證 10 碼檢核碼驗證（相容外籍護照）、重複報名阻擋、額滿阻擋、報名確認頁與預覽畫面**身分證字號自動隱碼**（如 `A123****89`）。 |
+| `_DB_Admins` | 全平台承辦人帳號、顯示名稱、加密密碼與權限角色 |
+| `_DB_Events` | 全平台活動設定、三態狀態、報名起訖日期與動態表單 JSON |
+| `_DB_Registrations` | 全平台完整報名紀錄（含個人/團報、團名、匯款方式與尾五碼） |
+| `各活動專屬分頁` | 建立新活動時自動開立的可視化名單分頁，即時對齊表頭寫入與更新 |
+
+### 5.2 網路版環境變數一覽表（`.env` 或 Vercel Environment Variables）
+
+| 變數名稱 | 必填 | 說明 |
+| :--- | :---: | :--- |
+| `JWT_SECRET` | 建議 | 正式環境 JWT 簽章密鑰（請設為高強度隨機字串） |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 選填 | 首次啟動建立的預設最高權限帳號密碼（預設 `admin` / `runner2026`） |
+| `ORGANIZER_REGISTER_CODE` | 選填 | 承辦人自行註冊開通授權碼（留空則開放直接註冊） |
+| `GOOGLE_MASTER_GAS_URL` | **模式 A 必填** | 部署 [Code.gs](../google-apps-script/Code.gs) 產生的 `/exec` 網址（**同時整合統一資料庫＋免費 Gmail 發信！**） |
+| `GOOGLE_MASTER_SHEET_ID` | **模式 B 必填** | 統一 Google 試算表 ID 或網址（搭配 `GOOGLE_SERVICE_ACCOUNT_EMAIL`、`GOOGLE_PRIVATE_KEY`） |
+| `RESEND_API_KEY` / `MAIL_FROM` | 選填 | 若使用模式 B（Sheets API），設定 Resend API 金鑰即可免費每月寄送 3,000 封報名確認信 |
+| `PUBLIC_SITE_URL` | 選填 | 正式網域（例：`https://your-domain.vercel.app`），用於 Email 中的反向查詢修改連結 |
+
+> 詳細圖文部署步驟請參閱 [docs/GOOGLE_SHEETS_SETUP.md](./GOOGLE_SHEETS_SETUP.md) 與 [.env.example](../.env.example)。
 
 ---
 
-## 二、系統架構與技術堆疊
+## 6. 本機啟動與內建測試帳號速查
 
-### 1. 雙系統獨立資料庫架構圖
-
-```mermaid
-flowchart LR
-    Runner["跑者（手機 / 電腦）"] -->|"填寫公開報名表"| WebApp["TUR 線上報名平台\n(React + Express)"]
-    Admin["主辦單位管理員"] -->|"JWT 登入管理 / 表單 / 配號"| WebApp
-    WebApp -->|"本地防掉單儲存"| SQLite[("SQLite 資料庫\nrunflow.db")]
-    WebApp <-->|"表頭同步 / 即時寫入 / 雙向拉取"| GSheet[("活動專屬 Google 試算表\n(獨立工作表分頁)")]
-    WebApp -.->|"獨立跨庫對接\n① 專用 CSV ② GAS 推送 ③ JSON API"| ChipSys["TUR 晶片計時平台\nrunchip-timing.vercel.app\n(各自獨立資料庫)"]
-```
-
-### 2. 技術堆疊
-
-| 層級 | 技術選型 | 說明 |
-| :--- | :--- | :--- |
-| **前端框架** | React 18 + Vite 6 + Tailwind CSS 3 | 單頁應用（SPA），編譯後輸出至 `dist/` |
-| **後端伺服器** | Node.js 24 + Express 4 | 同時支援本機常駐伺服器與 Vercel Serverless (`api/index.js`) |
-| **本地資料庫** | Node.js 內建 `node:sqlite` | 免安裝額外資料庫服務，內建自動欄位遷移機制 |
-| **權限驗證** | `bcryptjs` + JWT (`Bearer Token`) | 後台 API 全面驗證，密碼雜湊加密儲存 |
-| **雲端試算表** | `googleapis` (Sheets/Drive v4/v3) & GAS | 支援 Service Account 與 Apps Script Webhook |
-
----
-
-## 三、專案目錄結構說明
-
-| 路徑 | 用途說明 |
-| :--- | :--- |
-| `api/index.js` | Vercel Serverless 後端入口 |
-| `vercel.json` | Vercel 路由重寫與函數打包設定 |
-| `server/index.js` | Express 主伺服器與全域錯誤處理 |
-| `server/db.js` | SQLite 資料表建立、向下相容遷移、預設帳號與 TUR 範例活動初始化 |
-| `server/middleware/auth.js` | JWT 簽發與後台權限檢查中介層 |
-| `server/services/validation.js` | 台灣身分證檢核碼 / 外籍護照 / 電話 / Email 驗證與動態費用加總 |
-| `server/services/googleSheets.js` | Google Sheets API & GAS Webhook 雙向同步、母試算表建分頁引擎 |
-| `server/services/chipBridge.js` | TUR 晶片系統名單格式轉換、自動配號、隱碼、專用 CSV 與 GAS 推送引擎 |
-| `server/routes/auth.js` | 管理員登入、憑證狀態查詢與密碼變更 API |
-| `server/routes/adminEvents.js` | 後台活動 CRUD、橫幅上傳、試算表連線測試與一鍵建立分頁 API |
-| `server/routes/adminRegistrations.js` | 報名名單管理、繳費狀態雙向同步、自動配號、CSV 匯出與推送至晶片系統 |
-| `server/routes/public.js` | 前台公開活動列表、詳情查詢、防呆檢查與報名送出 API |
-| `server/routes/integration.js` | 獨立跨系統串接唯讀 API（供晶片系統拉取名單） |
-| `client/public/` | 官方 `tur-logo.jpg` 與 `tur-icon.png` 靜態資源 |
-| `client/src/components/` | `TurLogo`、`TurHeader`、`TurFooter`、`BannerHero`、`CountdownTimer`、`FormBuilder`、`DynamicFormField`、`SyncStatusBadge` |
-| `client/src/pages/` | `HomePage`、`PublicRegisterPage`、`AdminLoginPage`、`AdminDashboardPage`、`AdminEventEditorPage` |
-| `google-apps-script/Code.gs` | 免 GCP 專案用的 Google Apps Script Webhook 雙向同步腳本 |
-| `docs/GOOGLE_SHEETS_SETUP.md` | Google Sheets 串接專屬教學文件 |
-
----
-
-## 四、系統操作手冊
-
-### 1. 入口網址與預設測試帳號
-
-| 項目 | 本機網址 | 雲端範例（Vercel） |
-| :--- | :--- | :--- |
-| **TUR 大廳首頁** | `http://localhost:3000` | `https://您的網域/` |
-| **範例公開報名頁** | `http://localhost:3000/register/taipei-speed-marathon-2026` | `https://您的網域/register/taipei-speed-marathon-2026` |
-| **後台管理員登入** | `http://localhost:3000/admin/login` | `https://您的網域/admin/login` |
-| **健康檢查端點** | `http://localhost:3000/api/health` | `https://您的網域/api/health` |
-
-- **預設管理員帳號**：`admin`
-- **預設管理員密碼**：`runner2026`（正式上線請務必透過環境變數更改）
-
-### 2. 前台功能說明
-1. **TUR 大廳首頁**：提供「公開報名」、「晶片計時（直連 `runchip-timing.vercel.app`）」、「後台管理」三大入口卡片與開放賽事清單。
-2. **戶外高對比模式**：點擊右上角「高對比」按鈕，一鍵切換為黑底白字黃框，適合戶外強光環境使用。
-3. **公開報名頁面**：
-   - 頂部顯示自訂橫幅、賽事計時類型（距離賽 / 繞圈限時賽）、即時報名截止倒數與名額進度條。
-   - 選擇報名組別與加購項目時，即時於側邊欄（桌面）或底部條（手機）顯示應繳總金額與明細。
-   - 送出後依序檢查必填、身分證檢核碼、重複報名、額滿與開放時間；成功後顯示專屬報名序號、隱碼明細與繳費資訊，支援列印 / 存 PDF。
-
-### 3. 後台 6 大管理分頁說明
-
-進入後台點選任一活動的 **「管理設定 / 表單 / 晶片串接」**，共提供 6 個分頁：
-
-| 分頁名稱 | 核心功能 |
-| :--- | :--- |
-| **1. 基本設定與網址** | 修改活動名稱、英文名稱（雙語證書用）、公開網址代碼（Slug）、賽事模式（距離賽 / 繞圈限時賽）、活動日期、報名起訖、名額上限、活動簡介與繳費資訊。 |
-| **2. 橫幅 Banner 自訂** | 即時預覽前台橫幅；可修改主標題、副標題，並支援**貼上圖片網址**、**套用內建精選背景**或上傳圖片檔案。 |
-| **3. 動態表單** | 拖曳或上下鍵調整欄位排序；增刪改 11 種欄位格式；設定必填、選項金額、數字單價；在「報名組別」欄位可設定每個組別的 **晶片代碼（如 `50K`, `42K`）** 與 **配號前綴（如 `A`, `B`）**；頂部即時預覽試算表表頭。 |
-| **4. Google 試算表** | 切換 3 種同步模式（API / GAS Webhook / 本地）；一鍵開新空白試算表、複製機器人 Email、一鍵自動建立該活動專屬工作表分頁與表頭、測試連線。 |
-| **5. 報名名單** | 搜尋跑者、即時切換繳費狀態（會自動回寫 Google 試算表）、點擊修改單筆參賽編號（Bib）、一鍵自動配號、從試算表雙向拉取更新、補送失敗資料、匯出完整 CSV 或晶片專用 CSV。 |
-| **6. 晶片系統連結** | 設定對應的 `eventId` 與晶片系統網址；提供自動配號 + 專用 CSV 下載、GAS 一鍵推送、獨立跨系統 JSON API 網址複製，以及隱碼選手名單即時預覽表。 |
-
----
-
-## 五、Google 試算表雙向同步設定指南
-
-| 模式 | 適用情境 | 關鍵設定 |
-| :--- | :--- | :--- |
-| **模式 A：Google Sheets API（推薦）** | 正式營運、多場活動各自獨立分頁 | 在 GCP 啟用 **Google Sheets API** 與 **Google Drive API**，建立 Service Account 取得 JSON 金鑰，將目標試算表「共用（編輯者）」給機器人 Email，並建議設定 `GOOGLE_MASTER_SHEET_ID` 作為母試算表。 |
-| **模式 B：GAS Webhook** | 免開 GCP、2 分鐘快速串接 | 開啟試算表 → 擴充功能 → Apps Script → 貼上 `google-apps-script/Code.gs` → 部署為「網頁應用程式（執行身分：我、誰可以存取：所有人）」→ 將 `/exec` 網址貼回後台。 |
-| **模式 C：本地展示模式** | 離線測試、暫不連雲端 | 資料存於本地 SQLite，隨時可匯出 CSV 或後續切換為雲端模式補送。 |
-
-> 詳細步驟請參閱 [GOOGLE_SHEETS_SETUP.md](file:///e:/antigravity/活動報名/docs/GOOGLE_SHEETS_SETUP.md)。
-
----
-
-## 六、TUR 晶片計時系統串接指南（獨立資料庫模式）
-
-### 1. 標準欄位對齊表
-
-| 本系統資料 | 晶片系統欄位 (`runchip-timing`) | 轉換邏輯 |
-| :--- | :--- | :--- |
-| `bib_number` | `bib`（參賽編號） | 依組別前綴自動產生（如 `A001`、`B001`）或手動指定 |
-| `runner_name` | `name`（姓名） | 原樣輸出 |
-| `runner_id_number` | `idNumber` / `idMasked` / `idHash` | 自動大寫；同步提供隱碼與 SHA-256 雜湊（共用 NFC 晶片主鍵） |
-| `category_code` | `categoryId`（分組代碼） | 依表單組別設定（如 `50K`, `42K`, `21K`, `10K`, `5K`） |
-| `gender` | `gender` | 自動標準化為 `M` / `F`（未填時由台灣身分證第 2 碼推算） |
-| `birth_date` / `city` / `country` | `dob` / `city` / `country` | 直接對齊晶片系統與 DUV 超馬認證匯出格式（預設國籍 `TPE`） |
-
-### 2. 三種串接作業流程
-
-1. **最穩作業流程（自動配號 + 專用 CSV 匯入）**：
-   - 截止報名並對帳完成（將已收款跑者改為「已繳費」）。
-   - 進入後台 **「晶片系統連結」** 分頁 → 勾選「僅匯出已繳費」→ 按 **「步驟 A：依組別自動配號 (Bib)」** → 按 **「步驟 B：下載 TUR 晶片專用匯入 CSV」**。
-   - 開啟 [TUR 晶片計時系統](https://runchip-timing.vercel.app/) 後台 → 選手名單 → 批次匯入剛下載的 CSV 即可完成！
-2. **一鍵推送（GAS `upsertRegistrations`）**：
-   - 填入晶片系統的 GAS 同步網址 → 輸入晶片系統管理員帳密 → 點擊「推送至晶片系統」即透過 HTTPS 直接傳送。
-3. **跨系統 API 拉取（自動化整合用）**：
-   - 晶片系統或外部腳本可呼叫：
-     ```http
-     GET https://您的報名網域/api/integration/events/{slug}/roster?paidOnly=true
-     X-API-Key: 您設定的 INTEGRATION_API_KEY
-     ```
-   - 加上 `&format=csv` 則直接回傳晶片專用 CSV 檔。
-
----
-
-## 七、安裝、啟動與雲端部署
-
-### 1. 本機開發與啟動指令
+### 啟動指令（Windows PowerShell）
 
 ```powershell
-# 1. 安裝相依套件（Windows PowerShell 請用 npm.cmd）
 npm.cmd install
-
-# 2. 編譯前端正式版至 dist/
 npm.cmd run build
-
-# 3. 啟動全端伺服器（預設 http://localhost:3000）
 npm.cmd start
-
-# （選用）前後端熱重載開發模式
-npm.cmd run dev
 ```
 
-### 2. 完整環境變數清單（`.env` 或 Vercel Environment Variables）
+### 常用網址與測試帳號
 
-| 變數名稱（Key） | 必填 | 說明 |
-| :--- | :---: | :--- |
-| `PORT` | 選填 | 本機伺服器埠號（預設 `3000`） |
-| `JWT_SECRET` | **建議** | 後台登入 Token 加密密鑰（正式環境請設高強度隨機字串） |
-| `ADMIN_USERNAME` | 選填 | 預設管理員帳號（預設 `admin`） |
-| `ADMIN_PASSWORD` | **建議** | 預設管理員密碼（預設 `runner2026`，上線務必更改） |
-| `GOOGLE_SERVICE_ACCOUNT_EMAIL` | 模式 A | Service Account JSON 內的 `client_email`（請勿包含雙引號） |
-| `GOOGLE_PRIVATE_KEY` | 模式 A | Service Account JSON 內的 `private_key`（保留 `\n`，勿包含雙引號） |
-| `GOOGLE_AUTO_SHARE_EMAIL` | 選填 | 自動建立獨立試算表時要分享編輯權限的個人 Gmail |
-| `GOOGLE_MASTER_SHEET_ID` | **強烈建議** | 已共用給機器人（編輯者）的母試算表網址或 ID；設定後可一鍵建立專屬分頁，且 Vercel 重啟不掉線 |
-| `INTEGRATION_API_KEY` | 跨系統 API | 呼叫 `/api/integration/*` 時帶入 `X-API-Key` 的驗證密鑰 |
-
-### 3. 雲端部署重點提醒（GitHub + Vercel / Render）
-
-| 項目 | 注意事項 |
-| :--- | :--- |
-| **GitHub 上傳檔案** | 必傳：`api/`、`client/`、`server/`、`google-apps-script/`、`docs/`、`package.json`、`package-lock.json`、`vercel.json`、`.env.example`、`.gitignore`、`README.md`。<br>不可傳：`node_modules/`、`dist/`、`.env`、`credentials/`、`data/*.db`、`uploads/*`（已由 `.gitignore` 自動排除）。 |
-| **Vercel Node 版本** | 本專案使用 Node 內建 `node:sqlite`，`package.json` 已鎖定 `"engines": { "node": "24.x" }`；Vercel 專案設定請確認為 **24.x**。 |
-| **資料保存機制** | Vercel Serverless 閒置重啟會清空 `/tmp` 暫存 SQLite，務必設定 `GOOGLE_MASTER_SHEET_ID` 並以 Google 試算表保存所有報名紀錄；若需長期永久保留多場後台設定與圖片上傳，建議部署於支援持久硬碟（Disk / Volume）的 **Render** 或 **Zeabur**。 |
-
----
-
-## 八、RESTful API 端點速查表
-
-| 分類 | Method & 路徑 | 權限 | 功能說明 |
-| :--- | :--- | :---: | :--- |
-| **系統** | `GET /api/health` | 公開 | 健康檢查與服務狀態 |
-| **公開** | `GET /api/public/events` | 公開 | 取得所有啟用中的活動列表 |
-| **公開** | `GET /api/public/events/:slug` | 公開 | 取得單一活動詳情、表單結構與名額狀態 |
-| **公開** | `POST /api/public/events/:slug/register` | 公開 | 驗證表單、計算金額、寫入本地與 Google 試算表 |
-| **驗證** | `POST /api/auth/login` | 公開 | 管理員登入取得 JWT Token |
-| **驗證** | `GET /api/auth/me` | JWT | 取得管理員資訊與 Google 憑證載入狀態 |
-| **活動** | `GET / POST /api/admin/events` | JWT | 取得全部活動 / 建立新活動（自動帶入預設欄位） |
-| **活動** | `GET / PUT / DELETE /api/admin/events/:id` | JWT | 檢視 / 更新活動（自動同步試算表表頭）/ 刪除活動 |
-| **活動** | `PATCH /api/admin/events/:id/toggle` | JWT | 啟用或暫停活動報名 |
-| **活動** | `POST /api/admin/events/:id/upload-banner` | JWT | 上傳橫幅背景圖片（限 5MB 內圖片） |
-| **試算表** | `POST /api/admin/events/:id/sheets/auto-create` | JWT | 一鍵建立專屬工作表分頁（或獨立試算表）並格式化表頭 |
-| **試算表** | `POST /api/admin/events/:id/sheets/test` | JWT | 測試 Google Sheets API 或 GAS Webhook 連線 |
-| **名單** | `GET /api/admin/events/:id/registrations` | JWT | 取得活動所有報名名單 |
-| **名單** | `PATCH /api/admin/registrations/:id/payment-status` | JWT | 更新繳費狀態並雙向回寫 Google 試算表 |
-| **名單** | `PATCH /api/admin/registrations/:id/bib` | JWT | 手動修改單筆參賽編號（Bib）與分組代碼 |
-| **名單** | `POST /api/admin/events/:id/registrations/auto-assign-bibs` | JWT | 依組別前綴一鍵自動配號 |
-| **名單** | `POST /api/admin/events/:id/registrations/pull-from-sheet` | JWT | 從 Google 試算表雙向拉取最新修改與補報列 |
-| **名單** | `POST /api/admin/events/:id/registrations/retry-sync` | JWT | 一鍵補送同步異常的報名紀錄至 Google 試算表 |
-| **匯出** | `GET /api/admin/events/:id/registrations/export-csv` | JWT | 匯出完整報名名單 CSV（UTF-8 BOM） |
-| **晶片** | `GET /api/admin/events/:id/registrations/export-chip-csv` | JWT | 匯出 TUR 晶片計時系統專用匯入名單 CSV |
-| **晶片** | `POST /api/admin/events/:id/registrations/push-to-chip` | JWT | 透過 GAS `upsertRegistrations` 推送名單至晶片系統 |
-| **跨系統** | `GET /api/integration/events/:slug/roster` | API Key / JWT | 獨立跨系統標準 JSON / CSV 選手名單拉取端點 |
-
----
-
-## 九、常見問題與排錯（FAQ）
-
-| 問題現象 | 常見原因 | 解決方式 |
+| 項目 | 路徑 / 帳密 | 說明 |
 | :--- | :--- | :--- |
-| **Vercel 上出現 404 NOT_FOUND** | GitHub 根目錄未上傳 `vercel.json` 或 `api/index.js` | 確認 GitHub 最外層包含 `vercel.json` 與 `api/index.js` 並重新部署 |
-| **Vercel 改了環境變數卻沒生效** | 儲存後未重新部署，或未勾選 `Production` | 到 Vercel `Deployments` 對最新一筆按 `...` → `Redeploy` |
-| **Google 驗證失敗（401 / PEM 錯誤）** | 複製金鑰時誤貼頭尾雙引號或漏字 | 移除前後雙引號與尾端逗號（新版程式亦已內建自動清理） |
-| **Google 試算表 403 權限不足** | 試算表未共用給機器人，或免費帳號嘗試直接新建檔案 | 將原生 Google 試算表右上角「共用」給機器人 Email（編輯者），並改用「母試算表建分頁」模式 |
-| **Google 試算表 404 找不到** | 貼到發布網址 `/d/e/...`、Excel `.xlsx` 檔或未共用 | 確認檔案為原生 Google 試算表，改貼瀏覽器網址列 `/spreadsheets/d/ID/edit` |
-| **Windows PowerShell 無法執行 `npm`** | 系統 ExecutionPolicy 限制 `npm.ps1` | 指令改用 `npm.cmd`（例如 `npm.cmd install`、`npm.cmd start`） |
+| 前台報名平台首頁 | `http://localhost:3000` | 按月份條列開放中賽事（不顯示名額） |
+| 選手反向查詢與改報頁 | `http://localhost:3000/lookup` | 雙因子驗證查詢與修改資料／補填尾五碼 |
+| 後台管理入口 | `http://localhost:3000/admin/login` | 承辦人登入與註冊 |
+| 最高權限測試帳號 | `admin` / `runner2026` | 可管理全平台活動、承辦人權限與資料備份清空 |
+| 一般承辦人測試帳號（載入測試資料後） | `org_north` / `runner2026`<br>`org_south` / `runner2026` | 各自獨立管理名下活動，互不可存取或修改 |
+
+---
+
+## 7. 核心 API 端點速查表
+
+| 類別 | Method & Path | 說明 |
+| :--- | :--- | :--- |
+| **前台公開** | `GET /api/public/events` | 取得全平台所有「開放中」活動清單 |
+| | `GET /api/public/events/:slug` | 取得單一活動詳情與動態表單設定 |
+| | `POST /api/public/events/:slug/register` | 送出個人報名（支援個別／團體匯款與尾五碼，自動寄確認信） |
+| | `POST /api/public/events/:slug/register-group` | 送出團體報名（自訂團名、多位成員、團體／個別匯款尾五碼） |
+| | `POST /api/public/lookup` | 跨活動雙因子反向查詢個人報名狀況 |
+| | `POST /api/public/events/:slug/lookup` | 單一活動內雙因子反向查詢 |
+| | `PUT /api/public/events/:slug/registrations/:regCode` | 選手憑短期驗證 Token 安全修改資料／補填尾五碼 |
+| **帳號驗證** | `POST /api/auth/register` / `POST /api/auth/login` | 承辦人獨立註冊與登入 |
+| **活動管理** | `GET / POST / PUT / DELETE /api/admin/events` | 活動管理（一般承辦人限本人；總管全區管理與移轉歸屬） |
+| | `PATCH /api/admin/events/:id/status` | 一鍵切換報名表狀態（auto / preparing / open / closed） |
+| **名單對帳** | `PATCH /api/admin/registrations/:id/payment-status` | 單筆更新繳費狀態並自動寄發 Email 通知 |
+| | `PATCH /api/admin/events/:eventId/groups/:groupCode/payment-status` | 整團一鍵批次更新繳費狀態並通知全團 |
+| **最高權限** | `GET / POST / PATCH / DELETE /api/admin/users` | 承辦人帳號與權限管理（僅 `super_admin`） |
+| | `POST /api/admin/data/seed-demo` | 一鍵載入測試資料（僅 `super_admin`） |
+| | `GET /api/admin/data/backup` / `POST /api/admin/data/restore` | 資料完整備份下載與上傳還原（僅 `super_admin`） |
+| | `POST /api/admin/data/clear` | 資料清空（僅清報名名單或清空全表，僅 `super_admin`） |

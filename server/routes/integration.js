@@ -51,6 +51,19 @@ router.get('/events/:slug/roster', requireIntegrationAuth, (req, res) => {
     return res.status(404).json({ error: '找不到指定的活動代碼。' });
   }
 
+  // 若透過承辦人 JWT 存取，最高權限管理者放行，一般承辦人必須為活動建立者本人
+  if (req.admin) {
+    const me = db.prepare('SELECT role FROM admins WHERE id = ?').get(req.admin.id);
+    const isSuper = me?.role === 'super_admin';
+    const isOwner =
+      Number(event.owner_admin_id) === Number(req.admin.id) ||
+      (event.owner_username &&
+        event.owner_username.toLowerCase() === String(req.admin.username || '').toLowerCase());
+    if (!isSuper && !isOwner) {
+      return res.status(403).json({ error: '權限不足：僅該活動建立承辦人或最高權限管理者可存取此名單。' });
+    }
+  }
+
   const paidOnly = String(req.query.paidOnly || '').toLowerCase() === 'true';
   const format = String(req.query.format || 'json').toLowerCase();
   const fields = JSON.parse(event.fields_json || '[]');

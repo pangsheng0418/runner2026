@@ -2,7 +2,19 @@ const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
 
-const SYSTEM_HEADERS = ['報名序號', '參賽編號', '分組代碼', '報名時間', '應繳總金額', '繳費狀態'];
+const SYSTEM_HEADERS = [
+  '報名序號',
+  '報名類型',
+  '團體名稱',
+  '團報代碼',
+  '參賽編號',
+  '分組代碼',
+  '報名時間',
+  '應繳總金額',
+  '匯款方式',
+  '匯款後五碼',
+  '繳費狀態',
+];
 
 /**
  * 從完整 Google Sheets 網址或純 ID 擷取 Spreadsheet ID
@@ -109,6 +121,81 @@ function getServiceAccountAuth() {
   return null;
 }
 
+function getMasterDatabaseConfig() {
+  const auth = getServiceAccountAuth();
+  const masterSheetRaw = stripWrappingQuotes(
+    process.env.GOOGLE_MASTER_SHEET_ID || process.env.GOOGLE_MASTER_SHEET_URL
+  );
+  let masterSheetId = '';
+  try {
+    masterSheetId = extractSpreadsheetId(masterSheetRaw);
+  } catch (_) {
+    masterSheetId = '';
+  }
+
+  const masterGasUrl = stripWrappingQuotes(process.env.GOOGLE_MASTER_GAS_URL);
+
+  if (auth && masterSheetId) {
+    return {
+      configured: true,
+      mode: 'api',
+      sheetId: masterSheetId,
+      sheetUrl: `https://docs.google.com/spreadsheets/d/${masterSheetId}/edit`,
+      gasUrl: '',
+    };
+  }
+
+  if (masterGasUrl) {
+    return {
+      configured: true,
+      mode: 'webhook',
+      sheetId: masterSheetId,
+      sheetUrl: masterSheetId ? `https://docs.google.com/spreadsheets/d/${masterSheetId}/edit` : '',
+      gasUrl: masterGasUrl,
+    };
+  }
+
+  return {
+    configured: false,
+    mode: 'local',
+    sheetId: masterSheetId,
+    sheetUrl: masterSheetId ? `https://docs.google.com/spreadsheets/d/${masterSheetId}/edit` : '',
+    gasUrl: '',
+  };
+}
+
+/**
+ * 將活動解析為統一母試算表設定（無需每個活動各建連結）
+ */
+function resolveEffectiveSheetTarget(event = {}) {
+  const master = getMasterDatabaseConfig();
+  if (master.configured) {
+    return {
+      mode: master.mode,
+      sheetId: master.sheetId,
+      sheetUrl: master.sheetUrl,
+      gasUrl: master.gasUrl,
+      tabName: sanitizeSheetTabName(event.sheet_tab_name || event.name || '報名資料'),
+    };
+  }
+
+  // 若尚未設定平台統一母試算表，仍向下相容既有活動綁定
+  const mode = event.sheet_sync_mode || 'local';
+  let sheetId = '';
+  try {
+    sheetId = extractSpreadsheetId(event.sheet_id || event.sheet_url);
+  } catch (_) {
+    sheetId = '';
+  }
+  return {
+    mode,
+    sheetId,
+    sheetUrl: event.sheet_url || (sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit` : ''),
+    gasUrl: stripWrappingQuotes(event.gas_webhook_url),
+    tabName: sanitizeSheetTabName(event.sheet_tab_name || event.name || '報名資料'),
+  };
+}
+
 function getCredentialsStatus() {
   const auth = getServiceAccountAuth();
   let serviceAccountEmail = stripWrappingQuotes(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL);
@@ -137,22 +224,18 @@ function getCredentialsStatus() {
     }
   }
 
-  const masterSheetRaw = stripWrappingQuotes(
-    process.env.GOOGLE_MASTER_SHEET_ID || process.env.GOOGLE_MASTER_SHEET_URL
-  );
-  let masterSheetId = '';
-  try {
-    masterSheetId = extractSpreadsheetId(masterSheetRaw);
-  } catch (_) {
-    masterSheetId = '';
-  }
+  const master = getMasterDatabaseConfig();
 
   return {
     configured: Boolean(auth),
     serviceAccountEmail,
     autoShareEmail: stripWrappingQuotes(process.env.GOOGLE_AUTO_SHARE_EMAIL),
-    masterSheetConfigured: Boolean(masterSheetId),
-    masterSheetId,
+    masterSheetConfigured: Boolean(master.sheetId),
+    masterSheetId: master.sheetId,
+    masterGasConfigured: Boolean(master.gasUrl),
+    unifiedDbConfigured: master.configured,
+    unifiedDbMode: master.mode,
+    isVercel: Boolean(process.env.VERCEL),
   };
 }
 
@@ -498,7 +581,8 @@ async function callGasWebhook(webhookUrl, payload) {
  * 同步表頭至對應 Google 試算表第一列（新增欄位自動對齊不破壞舊資料）
  */
 async function syncSheetHeaders(event, fields) {
-  const mode = event.sheet_sync_mode || 'local';
+  const target = resolveEffectiveSheetTarget(event);
+  const mode = target.mode;
   const expectedHeaders = buildExpectedHeaders(fields);
 
   if (mode === 'local') {
@@ -506,12 +590,12 @@ async function syncSheetHeaders(event, fields) {
   }
 
   if (mode === 'webhook') {
-    const res = await callGasWebhook(event.gas_webhook_url, {
+    const res = await callGasWebhook(target.gasUrl, {
       action: 'sync_headers',
-      tabName: event.sheet_tab_name || '報名資料',
+      tabName: target.tabName,
       headers: expectedHeaders,
     });
-    return { synced: true, mode: 'webhook', headers: res.headers || expectedHeaders };
+    return { synced: true, mode: 'webhook', tabName: target.tabName, headers: res.headers || expectedHeaders };
   }
 
   // mode === 'api'
@@ -519,15 +603,15 @@ async function syncSheetHeaders(event, fields) {
   if (!auth) {
     throw new Error('未偵測到 Google Service Account 憑證，無法同步表頭。');
   }
-  const spreadsheetId = extractSpreadsheetId(event.sheet_id || event.sheet_url);
+  const spreadsheetId = target.sheetId;
   if (!spreadsheetId) {
-    throw new Error('尚未綁定 Google 試算表 ID 或連結。');
+    throw new Error('尚未設定平台統一 Google 試算表（GOOGLE_MASTER_SHEET_ID）。');
   }
 
   try {
     const sheets = google.sheets({ version: 'v4', auth });
-    const tabName = event.sheet_tab_name || '報名資料';
-    await ensureWorksheetTab(sheets, spreadsheetId, tabName);
+    const tabName = target.tabName;
+    const sheetGid = await ensureWorksheetTab(sheets, spreadsheetId, tabName);
 
     // 讀取目前第一列，檢查是否已有報名資料
     const existingRes = await sheets.spreadsheets.values.get({
@@ -540,10 +624,8 @@ async function syncSheetHeaders(event, fields) {
 
     let finalHeaders;
     if (!hasExistingDataRows || currentHeaders.length === 0) {
-      // 尚無報名資料，直接完整寫入最新排序的表頭
       finalHeaders = expectedHeaders;
     } else {
-      // 已有報名資料：保留既有欄序避免錯位，並將新欄位附加在右側
       finalHeaders = [...currentHeaders];
       for (const h of expectedHeaders) {
         if (!finalHeaders.includes(h)) {
@@ -552,14 +634,15 @@ async function syncSheetHeaders(event, fields) {
       }
     }
 
-    await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: `'${tabName}'!A1:${colNumberToLetter(finalHeaders.length)}1`,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [finalHeaders] },
-    });
+    await styleAndWriteHeaderRow(sheets, spreadsheetId, sheetGid, tabName, finalHeaders);
 
-    return { synced: true, mode: 'api', headers: finalHeaders };
+    return {
+      synced: true,
+      mode: 'api',
+      tabName,
+      sheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=${sheetGid}`,
+      headers: finalHeaders,
+    };
   } catch (err) {
     throw new Error(formatGoogleError(err));
   }
@@ -569,18 +652,24 @@ async function syncSheetHeaders(event, fields) {
  * 將單筆報名資料依照試算表表頭自動對齊並寫入一列
  */
 async function appendRegistrationToSheet(event, fields, registration) {
-  const mode = event.sheet_sync_mode || 'local';
+  const target = resolveEffectiveSheetTarget(event);
+  const mode = target.mode;
   if (mode === 'local') {
-    return { synced: false, status: 'local', message: '目前為本地展示模式（尚未綁定雲端試算表）' };
+    return { synced: false, status: 'local', message: '尚未設定統一雲端試算表，暫存於本機資料庫' };
   }
 
   // 建立「表頭名稱 -> 欄位值」對照表
   const valueByHeader = {
     '報名序號': registration.reg_code,
+    '報名類型': registration.reg_type === 'group' ? '團體報名' : '個人報名',
+    '團體名稱': registration.group_name || '',
+    '團報代碼': registration.group_code || '',
     '參賽編號': registration.bib_number || '',
     '分組代碼': registration.category_code || '',
     '報名時間': registration.created_at,
     '應繳總金額': registration.total_amount,
+    '匯款方式': registration.payment_mode === 'group' ? '團體匯款' : '個別匯款',
+    '匯款後五碼': registration.remittance_last5 || '',
     '繳費狀態': registration.payment_status || '待繳費',
   };
 
@@ -602,9 +691,9 @@ async function appendRegistrationToSheet(event, fields, registration) {
   const expectedHeaders = buildExpectedHeaders(fields);
 
   if (mode === 'webhook') {
-    const res = await callGasWebhook(event.gas_webhook_url, {
+    const res = await callGasWebhook(target.gasUrl, {
       action: 'append_row',
-      tabName: event.sheet_tab_name || '報名資料',
+      tabName: target.tabName,
       headers: expectedHeaders,
       rowMap: valueByHeader,
     });
@@ -620,15 +709,15 @@ async function appendRegistrationToSheet(event, fields, registration) {
   if (!auth) {
     throw new Error('未偵測到 Google Service Account 憑證。');
   }
-  const spreadsheetId = extractSpreadsheetId(event.sheet_id || event.sheet_url);
+  const spreadsheetId = target.sheetId;
   if (!spreadsheetId) {
-    throw new Error('尚未綁定 Google 試算表 ID。');
+    throw new Error('尚未設定統一 Google 試算表 ID。');
   }
 
   try {
     const sheets = google.sheets({ version: 'v4', auth });
-    const tabName = event.sheet_tab_name || '報名資料';
-    await ensureWorksheetTab(sheets, spreadsheetId, tabName);
+    const tabName = target.tabName;
+    const sheetGid = await ensureWorksheetTab(sheets, spreadsheetId, tabName);
 
     // 取得最新表頭（若空白則先建立）
     const headerRes = await sheets.spreadsheets.values.get({
@@ -638,14 +727,8 @@ async function appendRegistrationToSheet(event, fields, registration) {
     let headers = headerRes.data.values?.[0] || [];
     if (headers.length === 0) {
       headers = expectedHeaders;
-      await sheets.spreadsheets.values.update({
-        spreadsheetId,
-        range: `'${tabName}'!A1:${colNumberToLetter(headers.length)}1`,
-        valueInputOption: 'USER_ENTERED',
-        requestBody: { values: [headers] },
-      });
+      await styleAndWriteHeaderRow(sheets, spreadsheetId, sheetGid, tabName, headers);
     } else {
-      // 若有新欄位尚未出現在試算表表頭，自動補齊表頭
       const missing = expectedHeaders.filter((h) => !headers.includes(h));
       if (missing.length > 0) {
         headers = [...headers, ...missing];
@@ -685,15 +768,16 @@ async function appendRegistrationToSheet(event, fields, registration) {
  * 雙向同步：從 Google 試算表讀取最新列資料（更新繳費狀態、匯入雲端手動新增列）
  */
 async function pullRowsFromSheet(event) {
-  const mode = event.sheet_sync_mode || 'local';
+  const target = resolveEffectiveSheetTarget(event);
+  const mode = target.mode;
   if (mode === 'local') {
-    throw new Error('目前為本地展示模式，請先切換為 Google Sheets API 或 GAS Webhook 模式。');
+    throw new Error('尚未設定平台統一 Google 試算表（GOOGLE_MASTER_SHEET_ID 或 GOOGLE_MASTER_GAS_URL）。');
   }
 
   if (mode === 'webhook') {
-    const res = await callGasWebhook(event.gas_webhook_url, {
+    const res = await callGasWebhook(target.gasUrl, {
       action: 'pull_rows',
-      tabName: event.sheet_tab_name || '報名資料',
+      tabName: target.tabName,
     });
     return {
       headers: res.headers || [],
@@ -705,14 +789,14 @@ async function pullRowsFromSheet(event) {
   if (!auth) {
     throw new Error('未偵測到 Google Service Account 憑證。');
   }
-  const spreadsheetId = extractSpreadsheetId(event.sheet_id || event.sheet_url);
+  const spreadsheetId = target.sheetId;
   if (!spreadsheetId) {
-    throw new Error('尚未綁定 Google 試算表 ID。');
+    throw new Error('尚未設定統一 Google 試算表 ID。');
   }
 
   try {
     const sheets = google.sheets({ version: 'v4', auth });
-    const tabName = event.sheet_tab_name || '報名資料';
+    const tabName = target.tabName;
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: `'${tabName}'!A:ZZ`,
@@ -736,28 +820,29 @@ async function pullRowsFromSheet(event) {
 }
 
 /**
- * 測試 Google 試算表連線狀態
+ * 測試平台統一 Google 試算表連線狀態
  */
 async function testSheetConnection(event) {
-  const mode = event.sheet_sync_mode || 'local';
+  const target = resolveEffectiveSheetTarget(event);
+  const mode = target.mode;
   if (mode === 'local') {
     return {
-      ok: true,
+      ok: false,
       mode: 'local',
-      message: '目前使用本地 SQLite 模式，報名資料會安全儲存於本機資料庫並支援 CSV 匯出。',
+      message: '尚未設定平台統一雲端試算表，請於部署環境變數設定 GOOGLE_MASTER_SHEET_ID（搭配 Service Account）或 GOOGLE_MASTER_GAS_URL。',
     };
   }
 
   if (mode === 'webhook') {
-    const res = await callGasWebhook(event.gas_webhook_url, {
+    const res = await callGasWebhook(target.gasUrl, {
       action: 'ping',
-      tabName: event.sheet_tab_name || '報名資料',
+      tabName: target.tabName,
     });
     return {
       ok: true,
       mode: 'webhook',
-      sheetTitle: res.sheetTitle || 'Google Apps Script 試算表',
-      message: `GAS Webhook 連線成功！目標試算表：${res.sheetTitle || '已連結'}`,
+      sheetTitle: res.sheetTitle || '平台統一 Google 試算表',
+      message: `統一雲端試算表連線成功（GAS 模式）！試算表：「${res.sheetTitle || '已連結'}」，活動分頁：「${target.tabName}」`,
     };
   }
 
@@ -765,9 +850,9 @@ async function testSheetConnection(event) {
   if (!auth) {
     throw new Error('尚未偵測到 Google Service Account 金鑰，請先完成憑證設定。');
   }
-  const spreadsheetId = extractSpreadsheetId(event.sheet_id || event.sheet_url);
+  const spreadsheetId = target.sheetId;
   if (!spreadsheetId) {
-    throw new Error('請輸入 Google 試算表 ID 或完整試算表網址。');
+    throw new Error('尚未設定平台統一試算表 GOOGLE_MASTER_SHEET_ID。');
   }
 
   try {
@@ -777,8 +862,7 @@ async function testSheetConnection(event) {
       ok: true,
       mode: 'api',
       sheetTitle: meta.data.properties?.title || spreadsheetId,
-      sheetUrl: meta.data.spreadsheetUrl,
-      message: `Google Sheets API 連線成功！試算表名稱：「${meta.data.properties?.title}」`,
+      message: `統一雲端試算表連線成功！試算表：「${meta.data.properties?.title}」，活動分頁：「${target.tabName}」`,
     };
   } catch (err) {
     throw new Error(formatGoogleError(err));
@@ -786,29 +870,34 @@ async function testSheetConnection(event) {
 }
 
 /**
- * 更新試算表中特定報名序號的繳費狀態
+ * 更新活動專屬分頁中特定報名序號的繳費狀態
  */
 async function updatePaymentStatusInSheet(event, regCode, newStatus) {
-  const mode = event.sheet_sync_mode || 'local';
+  const target = resolveEffectiveSheetTarget(event);
+  const mode = target.mode;
   if (mode === 'local') return { skipped: true };
 
   if (mode === 'webhook') {
-    await callGasWebhook(event.gas_webhook_url, {
-      action: 'update_payment_status',
-      tabName: event.sheet_tab_name || '報名資料',
-      regCode,
-      paymentStatus: newStatus,
-    });
-    return { synced: true };
+    try {
+      await callGasWebhook(target.gasUrl, {
+        action: 'update_payment_status',
+        tabName: target.tabName,
+        regCode,
+        paymentStatus: newStatus,
+      });
+      return { synced: true };
+    } catch (err) {
+      return { synced: false, error: err.message };
+    }
   }
 
   const auth = getServiceAccountAuth();
-  const spreadsheetId = extractSpreadsheetId(event.sheet_id || event.sheet_url);
+  const spreadsheetId = target.sheetId;
   if (!auth || !spreadsheetId) return { skipped: true };
 
   try {
     const sheets = google.sheets({ version: 'v4', auth });
-    const tabName = event.sheet_tab_name || '報名資料';
+    const tabName = target.tabName;
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: `'${tabName}'!A:Z`,
@@ -838,15 +927,203 @@ async function updatePaymentStatusInSheet(event, regCode, newStatus) {
   }
 }
 
+/**
+ * 更新活動專屬分頁中特定報名序號的參賽編號 (Bib) 與分組代碼
+ */
+async function updateBibInSheet(event, regCode, bibNumber, categoryCode) {
+  const target = resolveEffectiveSheetTarget(event);
+  const mode = target.mode;
+  if (mode === 'local') return { skipped: true };
+
+  if (mode === 'webhook') {
+    try {
+      await callGasWebhook(target.gasUrl, {
+        action: 'update_bib',
+        tabName: target.tabName,
+        regCode,
+        bibNumber: bibNumber || '',
+        categoryCode: categoryCode || '',
+      });
+      return { synced: true };
+    } catch (err) {
+      return { synced: false, error: err.message };
+    }
+  }
+
+  const auth = getServiceAccountAuth();
+  const spreadsheetId = target.sheetId;
+  if (!auth || !spreadsheetId) return { skipped: true };
+
+  try {
+    const sheets = google.sheets({ version: 'v4', auth });
+    const tabName = target.tabName;
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${tabName}'!A:Z`,
+    });
+    const values = res.data.values || [];
+    if (values.length < 2) return { skipped: true };
+
+    const headers = values[0];
+    const regCodeCol = headers.indexOf('報名序號');
+    const bibCol = headers.indexOf('參賽編號');
+    const catCol = headers.indexOf('分組代碼');
+    if (regCodeCol === -1) return { skipped: true };
+
+    const rowIdx = values.findIndex((row, idx) => idx > 0 && row[regCodeCol] === regCode);
+    if (rowIdx === -1) return { skipped: true };
+
+    const updates = [];
+    if (bibCol !== -1) {
+      updates.push({
+        range: `'${tabName}'!${colNumberToLetter(bibCol + 1)}${rowIdx + 1}`,
+        values: [[bibNumber || '']],
+      });
+    }
+    if (catCol !== -1 && categoryCode !== undefined) {
+      updates.push({
+        range: `'${tabName}'!${colNumberToLetter(catCol + 1)}${rowIdx + 1}`,
+        values: [[categoryCode || '']],
+      });
+    }
+    if (updates.length > 0) {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          valueInputOption: 'USER_ENTERED',
+          data: updates,
+        },
+      });
+    }
+    return { synced: true };
+  } catch (err) {
+    console.warn('[GoogleSheets] 更新試算表參賽編號失敗：', err.message);
+    return { synced: false, error: formatGoogleError(err) };
+  }
+}
+
+/**
+ * 選手反向修改報名資料或補填匯款帳號後五碼時，更新活動專屬分頁中對應列
+ */
+async function updateRegistrationInSheet(event, fields, registration) {
+  const target = resolveEffectiveSheetTarget(event);
+  const mode = target.mode;
+  if (mode === 'local') return { skipped: true };
+
+  const valueByHeader = {
+    '報名序號': registration.reg_code,
+    '報名類型': registration.reg_type === 'group' ? '團體報名' : '個人報名',
+    '團體名稱': registration.group_name || '',
+    '團報代碼': registration.group_code || '',
+    '參賽編號': registration.bib_number || '',
+    '分組代碼': registration.category_code || '',
+    '報名時間': registration.created_at,
+    '應繳總金額': registration.total_amount,
+    '匯款方式': registration.payment_mode === 'group' ? '團體匯款' : '個別匯款',
+    '匯款後五碼': registration.remittance_last5 || '',
+    '繳費狀態': registration.payment_status || '待繳費',
+  };
+
+  const answers =
+    typeof registration.answers_json === 'string'
+      ? JSON.parse(registration.answers_json || '{}')
+      : registration.answers || {};
+
+  for (const field of fields || []) {
+    if (field.type === 'calculated') continue;
+    const label = String(field.label || field.id).trim();
+    const val = answers[field.id];
+    valueByHeader[label] = Array.isArray(val) ? val.join('、') : val === undefined || val === null ? '' : String(val);
+  }
+
+  const expectedHeaders = buildExpectedHeaders(fields);
+
+  if (mode === 'webhook') {
+    try {
+      await callGasWebhook(target.gasUrl, {
+        action: 'update_row',
+        tabName: target.tabName,
+        regCode: registration.reg_code,
+        headers: expectedHeaders,
+        rowMap: valueByHeader,
+      });
+      return { synced: true };
+    } catch (err) {
+      return { synced: false, error: err.message };
+    }
+  }
+
+  const auth = getServiceAccountAuth();
+  const spreadsheetId = target.sheetId;
+  if (!auth || !spreadsheetId) return { skipped: true };
+
+  try {
+    const sheets = google.sheets({ version: 'v4', auth });
+    const tabName = target.tabName;
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${tabName}'!A:ZZ`,
+    });
+    const values = res.data.values || [];
+    if (values.length < 2) {
+      return await appendRegistrationToSheet(event, fields, registration);
+    }
+
+    let headers = values[0];
+    const missing = expectedHeaders.filter((h) => !headers.includes(h));
+    if (missing.length > 0) {
+      headers = [...headers, ...missing];
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `'${tabName}'!A1:${colNumberToLetter(headers.length)}1`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [headers] },
+      });
+    }
+
+    const regCodeCol = headers.indexOf('報名序號');
+    if (regCodeCol === -1) return { skipped: true };
+    const rowIdx = values.findIndex((row, idx) => idx > 0 && row[regCodeCol] === registration.reg_code);
+    if (rowIdx === -1) {
+      return await appendRegistrationToSheet(event, fields, registration);
+    }
+
+    const rowValues = headers.map((h) => (valueByHeader[h] !== undefined ? valueByHeader[h] : ''));
+    const rowNum = rowIdx + 1;
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `'${tabName}'!A${rowNum}:${colNumberToLetter(headers.length)}${rowNum}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [rowValues] },
+    });
+    return { synced: true, rowNumber: rowNum };
+  } catch (err) {
+    console.warn('[GoogleSheets] 更新試算表整列資料失敗：', err.message);
+    return { synced: false, error: formatGoogleError(err) };
+  }
+}
+
 module.exports = {
   SYSTEM_HEADERS,
   extractSpreadsheetId,
+  stripWrappingQuotes,
+  getServiceAccountAuth,
+  getMasterDatabaseConfig,
+  resolveEffectiveSheetTarget,
   getCredentialsStatus,
   buildExpectedHeaders,
+  colNumberToLetter,
+  ensureWorksheetTab,
+  sanitizeSheetTabName,
+  styleAndWriteHeaderRow,
+  formatGoogleError,
+  callGasWebhook,
   createSpreadsheetForEvent,
   syncSheetHeaders,
   appendRegistrationToSheet,
   pullRowsFromSheet,
   testSheetConnection,
   updatePaymentStatusInSheet,
+  updateBibInSheet,
+  updateRegistrationInSheet,
 };

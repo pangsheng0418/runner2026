@@ -1,7 +1,8 @@
 import React from 'react';
-import { AlertCircle, Calculator, Check } from 'lucide-react';
+import { AlertCircle, Calculator, Check, CheckCircle2 } from 'lucide-react';
+import { getFieldValidBadge } from '../utils/validation';
 
-export default function DynamicFormField({ field, value, onChange, error, pricing }) {
+export default function DynamicFormField({ field, value, onChange, onBlur, error, pricing, namePrefix = '' }) {
   if (field.type === 'calculated') {
     return (
       <div className="tur-card rounded-2xl border border-amber-400/40 bg-slate-950/90 p-5 shadow-lg">
@@ -33,9 +34,13 @@ export default function DynamicFormField({ field, value, onChange, error, pricin
     );
   }
 
+  const validBadge = getFieldValidBadge(field, value, error);
+
   const baseInputClass = `w-full rounded-xl border bg-slate-950/90 px-4 py-3 text-sm sm:text-base text-white placeholder-slate-500 transition focus:outline-none focus:ring-2 ${
     error
       ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/30'
+      : validBadge
+      ? 'border-emerald-500/70 focus:border-emerald-400 focus:ring-emerald-400/25'
       : 'border-slate-700/90 hover:border-slate-500 focus:border-lime-400 focus:ring-lime-400/25'
   }`;
 
@@ -88,7 +93,7 @@ export default function DynamicFormField({ field, value, onChange, error, pricin
                 <div className="flex items-center gap-3">
                   <input
                     type="radio"
-                    name={field.id}
+                    name={namePrefix ? `${namePrefix}_${field.id}` : field.id}
                     value={opt.value}
                     checked={checked}
                     onChange={() => onChange(field.id, opt.value)}
@@ -167,18 +172,23 @@ export default function DynamicFormField({ field, value, onChange, error, pricin
         ? field.type
         : 'text';
 
+    const isPhoneField = field.type === 'tel' || field.validation === 'phone';
+    const isRemittanceField = field.id === 'remittance_last5' || field.validation === 'remittance_last5';
+
     return (
       <div className="relative">
         <input
           type={inputType}
+          inputMode={isPhoneField || isRemittanceField ? 'numeric' : undefined}
+          maxLength={isRemittanceField ? 5 : isPhoneField ? 12 : undefined}
           min={field.type === 'number' ? 0 : undefined}
           value={value ?? ''}
-          onChange={(e) =>
-            onChange(
-              field.id,
-              field.type === 'tw_id' ? e.target.value.toUpperCase() : e.target.value
-            )
-          }
+          onChange={(e) => {
+            let nextVal = e.target.value;
+            if (field.type === 'tw_id') nextVal = nextVal.toUpperCase();
+            onChange(field.id, nextVal);
+          }}
+          onBlur={() => onBlur && onBlur(field.id, value)}
           placeholder={field.placeholder || ''}
           className={baseInputClass}
         />
@@ -199,16 +209,21 @@ export default function DynamicFormField({ field, value, onChange, error, pricin
           {field.required && <span className="ml-1 text-lime-400">*</span>}
         </span>
         {field.type === 'tw_id' && (
-          <span className="text-[11px] font-semibold text-sky-400">支援共用 NFC 晶片主鍵・隱碼保護</span>
+          <span className="text-[11px] font-semibold text-sky-400">個資全面隱碼保護</span>
         )}
       </label>
 
       {renderControl()}
 
       {error ? (
-        <p className="flex items-center gap-1.5 text-xs font-medium text-rose-400">
+        <p className="flex items-center gap-1.5 text-xs font-bold text-rose-400">
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
           <span>{error}</span>
+        </p>
+      ) : validBadge ? (
+        <p className="flex items-center gap-1.5 text-xs font-bold text-emerald-400">
+          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+          <span>{validBadge}</span>
         </p>
       ) : field.helperText ? (
         <p className="text-xs text-slate-400">{field.helperText}</p>

@@ -3,7 +3,12 @@ import { Timer } from 'lucide-react';
 
 function calcRemaining(targetIso) {
   if (!targetIso) return null;
-  const target = new Date(targetIso).getTime();
+  const s = String(targetIso).trim();
+  const normalized =
+    /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/.test(s)
+      ? `${s.replace(' ', 'T').length === 16 ? `${s.replace(' ', 'T')}:00` : s.replace(' ', 'T')}+08:00`
+      : s;
+  const target = new Date(normalized).getTime();
   if (Number.isNaN(target)) return null;
   const diff = target - Date.now();
   if (diff <= 0) {
@@ -16,7 +21,12 @@ function calcRemaining(targetIso) {
   return { expired: false, days, hours, minutes, seconds };
 }
 
-export default function CountdownTimer({ targetIso, label = '距離報名截止' }) {
+export default function CountdownTimer({
+  targetIso,
+  label = '距離報名截止',
+  expiredLabel = '已截止',
+  tone = 'lime',
+}) {
   const [time, setTime] = useState(() => calcRemaining(targetIso));
 
   useEffect(() => {
@@ -30,16 +40,29 @@ export default function CountdownTimer({ targetIso, label = '距離報名截止'
   if (!time) return null;
 
   const pad = (n) => String(n).padStart(2, '0');
+  const isSky = tone === 'sky';
 
   return (
-    <div className="inline-flex flex-wrap items-center gap-3 rounded-xl border border-lime-400/35 bg-slate-950/90 px-4 py-2.5 backdrop-blur-md shadow-lg">
-      <div className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wider text-lime-400">
+    <div
+      className={`inline-flex flex-wrap items-center gap-3 rounded-xl border bg-slate-950/90 px-4 py-2.5 backdrop-blur-md shadow-lg ${
+        isSky ? 'border-sky-400/40' : 'border-lime-400/35'
+      }`}
+    >
+      <div
+        className={`flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wider ${
+          isSky ? 'text-sky-300' : 'text-lime-400'
+        }`}
+      >
         <Timer className="h-4 w-4 animate-pulse" />
-        <span>{time.expired ? '報名已截止' : label}</span>
+        <span>{time.expired ? expiredLabel : label}</span>
       </div>
       {!time.expired && (
         <div className="flex items-center gap-1.5 font-mono-num text-sm sm:text-base font-bold text-white">
-          <span className="rounded-md bg-slate-900 border border-slate-700 px-2 py-0.5 text-lime-300">
+          <span
+            className={`rounded-md bg-slate-900 border border-slate-700 px-2 py-0.5 ${
+              isSky ? 'text-sky-300' : 'text-lime-300'
+            }`}
+          >
             {pad(time.days)}
           </span>
           <span className="text-xs text-slate-400">天</span>

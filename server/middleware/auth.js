@@ -8,6 +8,7 @@ function signAdminToken(admin) {
       id: admin.id,
       username: admin.username,
       displayName: admin.display_name,
+      role: admin.role || 'organizer',
     },
     JWT_SECRET,
     { expiresIn: '24h' }
@@ -20,7 +21,7 @@ function requireAdminAuth(req, res, next) {
 
   if (!token) {
     return res.status(401).json({
-      error: '未授權存取，請先登入後台管理帳號。',
+      error: '未授權存取，請先登入承辦人管理帳號。',
       code: 'AUTH_REQUIRED',
     });
   }

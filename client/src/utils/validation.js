@@ -4,41 +4,188 @@ const TW_ID_LETTERS = {
   S: 26, T: 27, U: 28, V: 29, W: 32, X: 30, Y: 31, Z: 33,
 };
 
+export const MIN_REGISTRATION_AGE = 16;
+
 export function validateTaiwanIdOrPassport(raw) {
   const value = String(raw || '').trim().toUpperCase();
-  if (!value) return '請填寫身分證字號或護照號碼';
+  if (!value) return '請填寫身份證字號或護照號碼';
 
   if (/^[A-Z]\d{9}$/.test(value)) {
     if (!/^[A-Z][1289]\d{8}$/.test(value)) {
-      return '台灣身分證字號格式不正確，請重新確認';
+      return '台灣身份證字號第 2 碼須為 1、2、8 或 9，請重新確認';
     }
     const code = TW_ID_LETTERS[value[0]];
     const nums = [Math.floor(code / 10), code % 10, ...value.slice(1).split('').map(Number)];
     const weights = [1, 9, 8, 7, 6, 5, 4, 3, 2, 1, 1];
     const sum = nums.reduce((acc, n, i) => acc + n * weights[i], 0);
     if (sum % 10 !== 0) {
-      return '台灣身分證字號檢核碼錯誤，請檢查是否輸入有誤';
+      return '台灣身份證字號檢核碼錯誤，請檢查是否輸入有誤';
     }
     return '';
+  }
+
+  // 外籍護照號碼：6~15 碼英數字（含至少一個數字，且不可為不完整的台灣身分證開頭純 1 英文+數字非 9 碼）
+  if (/^[A-Z]\d{1,8}$/.test(value)) {
+    return `台灣身份證字號須為 1 碼英文 + 9 碼數字（目前共 ${value.length} 碼）；外籍護照請輸入完整護照號碼`;
   }
 
   if (/^[A-Z0-9-]{6,15}$/.test(value) && /\d/.test(value)) {
     return '';
   }
-  return '請輸入正確的台灣身分證字號（10碼）或外籍護照號碼（6~15碼英數字）';
+  return '請輸入正確的台灣身份證字號（10 碼，例：A123456789）或外籍護照號碼（6~15 碼英數字）';
+}
+
+export function calculateAge(birthDateStr, referenceDate = new Date()) {
+  const s = String(birthDateStr || '').trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const dob = new Date(year, month - 1, day);
+  if (
+    Number.isNaN(dob.getTime()) ||
+    dob.getFullYear() !== year ||
+    dob.getMonth() !== month - 1 ||
+    dob.getDate() !== day
+  ) {
+    return null;
+  }
+  let age = referenceDate.getFullYear() - year;
+  const monthDiff = referenceDate.getMonth() + 1 - month;
+  if (monthDiff < 0 || (monthDiff === 0 && referenceDate.getDate() < day)) {
+    age -= 1;
+  }
+  return age;
+}
+
+export function validateBirthDateAge(raw, minAge = MIN_REGISTRATION_AGE) {
+  const age = calculateAge(raw);
+  if (age === null) {
+    return '請選擇有效的出生年月日';
+  }
+  if (age < 0 || age > 120) {
+    return '出生年月日不合理，請重新確認';
+  }
+  if (age < minAge) {
+    return `本活動限滿 ${minAge} 歲以上報名（依出生年月日計算目前實歲為 ${age} 歲，不符報名資格）`;
+  }
+  return '';
 }
 
 export function validateEmail(raw) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(raw || '').trim())
+  const val = String(raw || '').trim();
+  if (/\s/.test(val)) {
+    return '電子信箱不可包含空白字元';
+  }
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(val)
     ? ''
-    : '請輸入正確的電子信箱格式';
+    : '請輸入正確的電子信箱格式（例如 runner@example.com）';
 }
 
 export function validatePhone(raw) {
   const digits = String(raw || '').replace(/[\s\-()]/g, '');
-  return /^\+?\d{8,15}$/.test(digits)
-    ? ''
-    : '請輸入正確的聯絡電話（例如 0912-345678）';
+  if (!/^\d+$/.test(digits)) {
+    return '連絡電話統一為手機 10 碼數字（例：0912345678），請勿輸入英文字母或符號';
+  }
+  if (!digits.startsWith('09')) {
+    return '連絡電話統一為台灣手機號碼（須為 09 開頭共 10 碼，例：0912345678）';
+  }
+  if (digits.length !== 10) {
+    return `連絡電話須為手機 10 碼（目前輸入 ${digits.length} 碼，例：0912345678）`;
+  }
+  return '';
+}
+
+export function validateRemittanceLast5(raw) {
+  const val = String(raw || '').trim();
+  if (!/^\d+$/.test(val)) {
+    return '匯款帳號尾五碼僅限輸入數字（共 5 碼）';
+  }
+  if (val.length !== 5) {
+    return `匯款帳號尾五碼須為 5 位數字（目前輸入 ${val.length} 碼）`;
+  }
+  return '';
+}
+
+export function isBirthDateField(field) {
+  return (
+    field?.id === 'birth_date' ||
+    field?.validation === 'min_age_16' ||
+    (field?.type === 'date' && String(field?.label || '').includes('出生'))
+  );
+}
+
+/**
+ * 單一欄位即時檢核（輸入當下呼叫，isSubmit=false 時空值不報必填錯誤，只檢核已輸入格式）
+ */
+export function validateSingleField(field, val, { checkRequired = false } = {}) {
+  if (!field || field.type === 'calculated') return '';
+
+  if (field.type === 'checkbox') {
+    const arr = Array.isArray(val) ? val : [];
+    if (checkRequired && field.required && arr.length === 0) {
+      return `請至少選擇一項「${field.label}」`;
+    }
+    return '';
+  }
+
+  const strVal = val === undefined || val === null ? '' : String(val).trim();
+  if (!strVal) {
+    return checkRequired && field.required ? `請填寫「${field.label}」` : '';
+  }
+
+  if (field.type === 'tw_id' || field.validation === 'tw_id_or_passport') {
+    return validateTaiwanIdOrPassport(strVal);
+  }
+  if (isBirthDateField(field)) {
+    return validateBirthDateAge(strVal, MIN_REGISTRATION_AGE);
+  }
+  if (field.type === 'tel' || field.validation === 'phone') {
+    return validatePhone(strVal);
+  }
+  if (field.type === 'email' || field.validation === 'email') {
+    return validateEmail(strVal);
+  }
+  if (field.id === 'remittance_last5' || field.validation === 'remittance_last5') {
+    return validateRemittanceLast5(strVal);
+  }
+  if (field.type === 'number') {
+    const num = Number(strVal);
+    if (Number.isNaN(num) || num < 0) {
+      return `「${field.label}」須為有效正整數或 0`;
+    }
+  }
+  return '';
+}
+
+/**
+ * 回傳即時驗證通過時的友善綠字訊息（僅針對有格式驗證的欄位）
+ */
+export function getFieldValidBadge(field, val, error) {
+  if (error || !field) return '';
+  const strVal = val === undefined || val === null ? '' : String(val).trim();
+  if (!strVal) return '';
+
+  if (field.type === 'tw_id' || field.validation === 'tw_id_or_passport') {
+    return /^[A-Z]\d{9}$/.test(strVal.toUpperCase())
+      ? '台灣身份證字號檢核通過'
+      : '護照號碼格式驗證通過';
+  }
+  if (isBirthDateField(field)) {
+    const age = calculateAge(strVal);
+    return age !== null ? `符合滿 ${MIN_REGISTRATION_AGE} 歲報名資格（實歲 ${age} 歲）` : '';
+  }
+  if (field.type === 'tel' || field.validation === 'phone') {
+    return '手機 10 碼格式正確';
+  }
+  if (field.type === 'email' || field.validation === 'email') {
+    return '電子信箱格式正確';
+  }
+  if (field.id === 'remittance_last5' || field.validation === 'remittance_last5') {
+    return '匯款尾五碼格式正確';
+  }
+  return '';
 }
 
 /**
@@ -100,42 +247,9 @@ export function calculatePricing(fields, answers) {
  */
 export function validateAllFields(fields, answers) {
   const errors = {};
-
   for (const field of fields || []) {
-    if (field.type === 'calculated') continue;
-    const val = answers?.[field.id];
-
-    if (field.type === 'checkbox') {
-      const arr = Array.isArray(val) ? val : [];
-      if (field.required && arr.length === 0) {
-        errors[field.id] = `請至少選擇一項「${field.label}」`;
-      }
-      continue;
-    }
-
-    const strVal = val === undefined || val === null ? '' : String(val).trim();
-    if (field.required && !strVal) {
-      errors[field.id] = `請填寫「${field.label}」`;
-      continue;
-    }
-    if (!strVal) continue;
-
-    if (field.type === 'email' || field.validation === 'email') {
-      const msg = validateEmail(strVal);
-      if (msg) errors[field.id] = msg;
-    } else if (field.type === 'tel' || field.validation === 'phone') {
-      const msg = validatePhone(strVal);
-      if (msg) errors[field.id] = msg;
-    } else if (field.type === 'tw_id' || field.validation === 'tw_id_or_passport') {
-      const msg = validateTaiwanIdOrPassport(strVal);
-      if (msg) errors[field.id] = msg;
-    } else if (field.type === 'number') {
-      const num = Number(strVal);
-      if (Number.isNaN(num) || num < 0) {
-        errors[field.id] = `「${field.label}」須為有效正整數或 0`;
-      }
-    }
+    const msg = validateSingleField(field, answers?.[field.id], { checkRequired: true });
+    if (msg) errors[field.id] = msg;
   }
-
   return errors;
 }

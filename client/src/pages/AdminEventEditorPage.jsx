@@ -55,6 +55,8 @@ export default function AdminEventEditorPage() {
 
   const [tab, setTab] = useState('basic');
   const [event, setEvent] = useState(null);
+  const [currentAdmin, setCurrentAdmin] = useState(null);
+  const [organizers, setOrganizers] = useState([]);
   const [googleCreds, setGoogleCreds] = useState({ configured: false, serviceAccountEmail: '' });
   const [registrations, setRegistrations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -62,6 +64,7 @@ export default function AdminEventEditorPage() {
   const [uploading, setUploading] = useState(false);
   const [sheetBusy, setSheetBusy] = useState('');
   const [notice, setNotice] = useState({ type: '', text: '' });
+  const [forbiddenError, setForbiddenError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedReg, setSelectedReg] = useState(null);
 
@@ -80,6 +83,7 @@ export default function AdminEventEditorPage() {
 
   const fetchEventData = async () => {
     setLoading(true);
+    setForbiddenError('');
     try {
       const [evRes, regRes] = await Promise.all([
         apiRequest(`/api/admin/events/${id}`, { auth: true }),
@@ -87,11 +91,15 @@ export default function AdminEventEditorPage() {
       ]);
       setEvent(evRes.event);
       if (evRes.googleCredentials) setGoogleCreds(evRes.googleCredentials);
+      if (evRes.currentAdmin) setCurrentAdmin(evRes.currentAdmin);
+      if (Array.isArray(evRes.organizers)) setOrganizers(evRes.organizers);
       setRegistrations(regRes.registrations || []);
     } catch (err) {
       if (err.status === 401) {
         setAdminToken('');
         navigate('/admin/login', { replace: true });
+      } else if (err.status === 403 || err.status === 404) {
+        setForbiddenError(err.message || '您無權存取此活動報名表。');
       } else {
         showNotice('error', err.message);
       }
@@ -177,27 +185,6 @@ export default function AdminEventEditorPage() {
     }
   };
 
-  const handleAutoCreateSheet = async () => {
-    setSheetBusy('create');
-    try {
-      const res = await apiRequest(`/api/admin/events/${id}/sheets/auto-create`, {
-        method: 'POST',
-        auth: true,
-        body: {
-          sheet_url: event.sheet_url,
-          sheet_id: event.sheet_id,
-          sheet_tab_name: event.sheet_tab_name,
-        },
-      });
-      setEvent(res.event);
-      showNotice('success', res.message);
-    } catch (err) {
-      showNotice('error', err.message);
-    } finally {
-      setSheetBusy('');
-    }
-  };
-
   const handleTestSheet = async () => {
     setSheetBusy('test');
     try {
@@ -205,14 +192,10 @@ export default function AdminEventEditorPage() {
         method: 'POST',
         auth: true,
         body: {
-          sheet_sync_mode: event.sheet_sync_mode,
-          sheet_id: event.sheet_id,
-          sheet_url: event.sheet_url,
           sheet_tab_name: event.sheet_tab_name,
-          gas_webhook_url: event.gas_webhook_url,
         },
       });
-      showNotice('success', res.message);
+      showNotice(res.ok ? 'success' : 'warning', res.message);
     } catch (err) {
       showNotice('error', err.message);
     } finally {
@@ -269,6 +252,31 @@ export default function AdminEventEditorPage() {
         body: { payment_status: nextStatus },
       });
       setRegistrations((prev) => prev.map((r) => (r.id === regId ? res.registration : r)));
+      showNotice('success', res.message);
+    } catch (err) {
+      showNotice('error', err.message);
+    }
+  };
+
+  const handleGroupPaymentStatus = async (groupCode, groupName, nextStatus) => {
+    if (
+      !window.confirm(
+        `確定要將團體「${groupName || groupCode}（${groupCode}）」所有成員批次設為「${nextStatus}」嗎？`
+      )
+    ) {
+      return;
+    }
+    try {
+      const res = await apiRequest(
+        `/api/admin/events/${id}/groups/${encodeURIComponent(groupCode)}/payment-status`,
+        {
+          method: 'PATCH',
+          auth: true,
+          body: { payment_status: nextStatus },
+        }
+      );
+      const updatedMap = new Map((res.registrations || []).map((r) => [r.id, r]));
+      setRegistrations((prev) => prev.map((r) => updatedMap.get(r.id) || r));
       showNotice('success', res.message);
     } catch (err) {
       showNotice('error', err.message);
@@ -359,17 +367,37 @@ export default function AdminEventEditorPage() {
     }
   };
 
+  if (forbiddenError) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center px-4 text-center">
+        <div className="tur-control-bar max-w-md rounded-2xl p-8 space-y-4">
+          <AlertTriangle className="mx-auto h-12 w-12 text-amber-400" />
+          <h1 className="text-xl font-black text-white">無法進入此活動後台</h1>
+          <p className="text-sm text-slate-300 leading-relaxed">{forbiddenError}</p>
+          <Link
+            to="/admin"
+            className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-2.5 text-sm font-black text-slate-950 hover:bg-emerald-400"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            返回我的活動管理列表
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   if (loading || !event) {
     return (
       <div className="flex min-h-screen items-center justify-center text-slate-300">
         <Loader2 className="h-6 w-6 animate-spin text-lime-400 mr-2" />
-        載入 TUR 活動設定中...
+        載入活動設定中...
       </div>
     );
   }
 
   const publicUrl = `${window.location.origin}/register/${event.slug}`;
   const integrationApiUrl = `${window.location.origin}/api/integration/events/${event.slug}/roster?paidOnly=true`;
+  const hasUnifiedDb = Boolean(googleCreds.unifiedDbConfigured || event.sheet_sync_mode !== 'local');
   const filteredRegs = registrations.filter((r) => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return true;
@@ -379,15 +407,18 @@ export default function AdminEventEditorPage() {
       String(r.runner_name).toLowerCase().includes(q) ||
       String(r.runner_phone).toLowerCase().includes(q) ||
       String(r.runner_email).toLowerCase().includes(q) ||
-      String(r.runner_id_number).toLowerCase().includes(q)
+      String(r.runner_id_number).toLowerCase().includes(q) ||
+      String(r.remittance_last5 || '').toLowerCase().includes(q) ||
+      String(r.group_name || '').toLowerCase().includes(q) ||
+      String(r.group_code || '').toLowerCase().includes(q)
     );
   });
 
   const tabs = [
-    { key: 'basic', label: '基本設定與網址', icon: Settings },
+    { key: 'basic', label: '基本設定與狀態', icon: Settings },
     { key: 'banner', label: '橫幅 Banner 自訂', icon: ImageIcon },
     { key: 'form', label: `動態表單 (${event.fields?.length || 0})`, icon: ListChecks },
-    { key: 'sheets', label: 'Google 試算表', icon: FileSpreadsheet },
+    { key: 'sheets', label: '統一試算表資料庫', icon: FileSpreadsheet },
     { key: 'registrations', label: `報名名單 (${registrations.length})`, icon: Users },
     { key: 'chip', label: '晶片系統連結', icon: Cpu },
   ];
@@ -573,7 +604,9 @@ export default function AdminEventEditorPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1.5">報名開始時間</label>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  報名開始日期時間 *（到達此時間將自動切換為「開放中」）
+                </label>
                 <input
                   type="datetime-local"
                   value={(event.reg_start_at || '').slice(0, 16)}
@@ -582,7 +615,9 @@ export default function AdminEventEditorPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1.5">報名截止時間</label>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  報名截止日期時間 *（超過此時間將自動切換為「已結報」）
+                </label>
                 <input
                   type="datetime-local"
                   value={(event.reg_end_at || '').slice(0, 16)}
@@ -592,7 +627,7 @@ export default function AdminEventEditorPage() {
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                  報名人數上限（填 0 代表不限制）
+                  報名人數上限（填 0 代表不限制，額滿將自動轉為已結案）
                 </label>
                 <input
                   type="number"
@@ -602,17 +637,56 @@ export default function AdminEventEditorPage() {
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 font-mono-num text-sm text-white focus:border-lime-400 focus:outline-none"
                 />
               </div>
-              <div className="flex items-end pb-2">
-                <label className="inline-flex cursor-pointer items-center gap-2.5 text-sm font-bold text-slate-200">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(event.is_active)}
-                    onChange={(e) => updateEventField('is_active', e.target.checked)}
-                    className="h-5 w-5 accent-lime-400"
-                  />
-                  <span>啟用此活動（公開頁面可瀏覽與報名）</span>
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  報名狀態控制（目前前台顯示：
+                  <span
+                    className={
+                      event.regState?.status === 'open'
+                        ? 'text-emerald-400 font-black ml-1'
+                        : event.regState?.status === 'preparing'
+                        ? 'text-sky-400 font-black ml-1'
+                        : 'text-rose-400 font-black ml-1'
+                    }
+                  >
+                    {event.regState?.label || '未定'}
+                  </span>
+                  ）
                 </label>
+                <select
+                  value={event.event_status || 'auto'}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    updateEventField('event_status', val);
+                    updateEventField('is_active', val !== 'closed');
+                  }}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-bold text-white focus:border-lime-400 focus:outline-none"
+                >
+                  <option value="auto">自動依報名起訖日期切換（籌備中 → 開放中 → 已結案）</option>
+                  <option value="preparing">強制設為：籌備中（不在首頁公開，尚未開放填表）</option>
+                  <option value="open">強制設為：開放中（顯示於首頁並立即開放報名）</option>
+                  <option value="closed">強制設為：已結案（不在首頁公開，停止報名）</option>
+                </select>
               </div>
+              {currentAdmin?.role === 'super_admin' && organizers.length > 0 && (
+                <div className="md:col-span-2 rounded-xl border border-amber-500/35 bg-amber-950/20 p-4">
+                  <label className="block text-xs font-bold text-amber-300 mb-1.5">
+                    活動歸屬承辦人（最高權限總管可移轉活動承辦權責）
+                  </label>
+                  <select
+                    value={event.owner_admin_id || ''}
+                    onChange={(e) => updateEventField('owner_admin_id', Number(e.target.value))}
+                    className="w-full rounded-xl border border-amber-500/40 bg-slate-950 px-4 py-2.5 text-sm font-bold text-white focus:border-amber-400 focus:outline-none"
+                  >
+                    {organizers.map((org) => (
+                      <option key={org.id} value={org.id}>
+                        {org.display_name}（@{org.username}）
+                        {org.role === 'super_admin' ? ' — 最高權限承辦人' : ' — 一般承辦人'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             <div>
@@ -743,189 +817,87 @@ export default function AdminEventEditorPage() {
           </div>
         )}
 
-        {/* ==================== TAB 4: Google 試算表雙向同步 ==================== */}
+        {/* ==================== TAB 4: 平台統一 Google 試算表資料庫 ==================== */}
         {tab === 'sheets' && (
           <div className="tur-control-bar rounded-2xl p-6 space-y-6">
-            <div>
-              <h2 className="text-xl font-black text-white">
-                活動專屬 Google 試算表綁定與雙向同步
-              </h2>
-              <p className="text-sm text-slate-400 mt-1">
-                本報名系統擁有獨立的 Google 試算表與資料庫，不影響晶片計時系統運作。
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {[
-                {
-                  id: 'api',
-                  title: '模式 A：Google Sheets API',
-                  desc: '使用 GCP Service Account 憑證，支援一鍵自動建立該活動專屬分頁與雙向讀寫。',
-                },
-                {
-                  id: 'webhook',
-                  title: '模式 B：GAS Webhook',
-                  desc: '免開 GCP 專案！貼上 Google Apps Script 網頁應用程式網址即可雙向同步。',
-                },
-                {
-                  id: 'local',
-                  title: '模式 C：本地展示模式',
-                  desc: '未設定 Google 憑證時使用本地資料庫儲存，隨時可匯出 CSV 或切換雲端。',
-                },
-              ].map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => updateEventField('sheet_sync_mode', m.id)}
-                  className={`rounded-xl border p-4 text-left transition ${
-                    event.sheet_sync_mode === m.id
-                      ? 'border-lime-400 bg-lime-500/10 ring-2 ring-lime-400/25'
-                      : 'border-slate-700 bg-slate-950/70 hover:border-slate-500'
-                  }`}
-                >
-                  <p className="font-bold text-sm text-white">{m.title}</p>
-                  <p className="mt-1.5 text-xs text-slate-400 leading-relaxed">{m.desc}</p>
-                </button>
-              ))}
-            </div>
-
-            {event.sheet_sync_mode === 'api' && (
-              <div className="space-y-4 rounded-xl border border-slate-700 bg-slate-950/75 p-5">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="font-bold text-slate-300">伺服器憑證狀態：</span>
-                    {googleCreds.configured ? (
-                      <>
-                        <span className="text-emerald-400 font-bold">
-                          已載入（{googleCreds.serviceAccountEmail}）
-                        </span>
-                        {googleCreds.serviceAccountEmail && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard?.writeText(googleCreds.serviceAccountEmail);
-                              showNotice('success', '已複製機器人 Email！請到試算表右上角「共用」加入並設為「編輯者」。');
-                            }}
-                            className="inline-flex items-center gap-1 rounded-md bg-slate-800 px-2 py-1 text-[11px] font-semibold text-sky-300 hover:bg-slate-700"
-                          >
-                            <Copy className="h-3 w-3" />
-                            複製機器人 Email
-                          </button>
-                        )}
-                      </>
-                    ) : (
-                      <span className="text-amber-400 font-bold">
-                        尚未偵測到憑證（請設定環境變數或 credentials/google-service-account.json）
-                      </span>
-                    )}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleAutoCreateSheet}
-                    disabled={Boolean(sheetBusy) || !googleCreds.configured}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2 text-xs font-black text-slate-950 hover:bg-emerald-400 disabled:opacity-40"
-                  >
-                    {sheetBusy === 'create' ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Sparkles className="h-4 w-4" />
-                    )}
-                    <span>
-                      {event.sheet_url || event.sheet_id || googleCreds.masterSheetConfigured
-                        ? '一鍵自動建立專屬工作表分頁與表頭'
-                        : '一鍵自動建立專屬 Google 試算表'}
-                    </span>
-                  </button>
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-300 mb-2">
+                  <Database className="h-3.5 w-3.5" />
+                  單一統一雲端資料庫架構（免逐一建立連結）
                 </div>
+                <h2 className="text-xl font-black text-white">
+                  平台統一 Google 試算表資料庫
+                </h2>
+                <p className="text-sm text-slate-400 mt-1 leading-relaxed">
+                  比照晶片管理系統資料庫模式，進入本系統即自動指向「同一份」Google 試算表資料庫，承辦人無需為每個活動重新建立或貼上試算表連結！系統已自動為本活動建立獨立工作表分頁。
+                </p>
+              </div>
+            </div>
 
-                <div className="rounded-lg border border-sky-500/30 bg-sky-950/20 px-4 py-3 text-xs text-sky-200 space-y-1.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-bold text-sky-300">
-                      免費個人 Gmail 快速建立步驟（避開 Google 服務帳戶 0GB 建檔限制）：
-                    </span>
-                    <a
-                      href="https://sheets.new"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 rounded-md bg-sky-500 px-2.5 py-1 text-[11px] font-black text-slate-950 hover:bg-sky-400"
-                    >
-                      <ExternalLink className="h-3 w-3" />
-                      1. 點此開新空白試算表
-                    </a>
+            {/* 統一資料庫連線狀態卡 */}
+            <div
+              className={`rounded-xl border p-5 space-y-3 ${
+                googleCreds.unifiedDbConfigured
+                  ? 'border-emerald-500/40 bg-emerald-950/20'
+                  : 'border-amber-500/40 bg-amber-950/20'
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  {googleCreds.unifiedDbConfigured ? (
+                    <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0" />
+                  )}
+                  <div>
+                    <p className="text-sm font-black text-white">
+                      {googleCreds.unifiedDbConfigured
+                        ? `統一雲端資料庫已連線（${
+                            googleCreds.unifiedDbMode === 'api'
+                              ? 'Google Sheets API 模式'
+                              : 'GAS 統一試算表模式'
+                          }）`
+                        : '尚未設定平台統一雲端試算表環境變數'}
+                    </p>
+                    <p className="text-xs text-slate-300 mt-0.5">
+                      {googleCreds.unifiedDbConfigured
+                        ? '所有活動設定、報名名單、繳費狀態與配號皆即時寫入同一份雲端 Google 試算表，網路版跨裝置零遺失。'
+                        : '網路部署時，只需於 Vercel / 伺服器環境變數設定一次 GOOGLE_MASTER_SHEET_ID（搭配 Service Account）或 GOOGLE_MASTER_GAS_URL，全平台即自動整合為同一份資料庫。'}
+                    </p>
                   </div>
-                  <p className="text-slate-300">
-                    2. 開啟後點右上角「共用」，加入上方機器人 Email 並設為「編輯者」 → 3. 把瀏覽器網址貼到下方欄位 → 點綠色「一鍵自動建立專屬工作表分頁與表頭」即可完成！
-                    {googleCreds.masterSheetConfigured && (
-                      <span className="ml-1 font-bold text-emerald-300">
-                        （已偵測到母試算表 GOOGLE_MASTER_SHEET_ID，可直接點擊綠色按鈕！）
-                      </span>
-                    )}
+                </div>
+              </div>
+            </div>
+
+            {/* 本活動專屬分頁名稱 */}
+            <div className="rounded-xl border border-slate-700 bg-slate-950/75 p-5 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                    本活動在統一試算表中的專屬分頁名稱
+                  </label>
+                  <input
+                    type="text"
+                    value={event.sheet_tab_name || event.name || ''}
+                    onChange={(e) => updateEventField('sheet_tab_name', e.target.value)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
+                  />
+                  <p className="mt-1.5 text-[11px] text-slate-400">
+                    修改分頁名稱或增減動態表單欄位後，請點下方「儲存並同步表頭至專屬分頁」。
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="md:col-span-2">
-                    <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                      Google 試算表連結或 Spreadsheet ID
-                    </label>
-                    <input
-                      type="text"
-                      value={event.sheet_url || event.sheet_id || ''}
-                      onChange={(e) => {
-                        updateEventField('sheet_url', e.target.value);
-                        updateEventField('sheet_id', e.target.value);
-                      }}
-                      placeholder="貼上 https://docs.google.com/spreadsheets/d/.../edit 或純 ID"
-                      className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2.5 font-mono-num text-xs text-white focus:border-lime-400 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                      工作表分頁名稱
-                    </label>
-                    <input
-                      type="text"
-                      value={event.sheet_tab_name || '報名資料'}
-                      onChange={(e) => updateEventField('sheet_tab_name', e.target.value)}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
-                    />
-                  </div>
+                <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-xs text-slate-300 space-y-1.5">
+                  <p className="font-bold text-sky-300">各承辦人獨立權限與資料安全保護：</p>
+                  <p className="text-slate-400 leading-relaxed">
+                    所有活動資料集中於同一份雲端試算表內的不同分頁，為防止各承辦人互相改到資料，系統透過獨立帳號隔離權限，您可直接在「報名名單」分頁即時管理繳費、配號與匯出本活動專屬 CSV。
+                  </p>
                 </div>
               </div>
-            )}
+            </div>
 
-            {event.sheet_sync_mode === 'webhook' && (
-              <div className="space-y-4 rounded-xl border border-slate-700 bg-slate-950/75 p-5">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="md:col-span-2">
-                    <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                      Google Apps Script Webhook 網址（以 /exec 結尾）
-                    </label>
-                    <input
-                      type="url"
-                      value={event.gas_webhook_url || ''}
-                      onChange={(e) => updateEventField('gas_webhook_url', e.target.value)}
-                      placeholder="https://script.google.com/macros/s/AKfycb.../exec"
-                      className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2.5 font-mono-num text-xs text-white focus:border-lime-400 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                      工作表分頁名稱
-                    </label>
-                    <input
-                      type="text"
-                      value={event.sheet_tab_name || '報名資料'}
-                      onChange={(e) => updateEventField('sheet_tab_name', e.target.value)}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="flex flex-wrap items-center gap-3 pt-2">
+            <div className="flex flex-wrap items-center gap-3 pt-1">
               <button
                 type="button"
                 onClick={handleTestSheet}
@@ -937,13 +909,13 @@ export default function AdminEventEditorPage() {
                 ) : (
                   <CheckCircle2 className="h-4 w-4" />
                 )}
-                <span>測試連線</span>
+                <span>測試統一資料庫連線</span>
               </button>
 
               <button
                 type="button"
                 onClick={handleSyncHeaders}
-                disabled={Boolean(sheetBusy) || event.sheet_sync_mode === 'local'}
+                disabled={Boolean(sheetBusy) || !hasUnifiedDb}
                 className="inline-flex items-center gap-1.5 rounded-xl border border-lime-500/40 bg-lime-500/15 px-4 py-2.5 text-xs font-bold text-lime-300 hover:bg-lime-500/25 disabled:opacity-40"
               >
                 {sheetBusy === 'headers' ? (
@@ -951,18 +923,28 @@ export default function AdminEventEditorPage() {
                 ) : (
                   <RefreshCw className="h-4 w-4" />
                 )}
-                <span>儲存並同步表頭至試算表</span>
+                <span>儲存並同步表頭至專屬分頁</span>
               </button>
 
-              {event.sheet_url && (
+              <button
+                type="button"
+                onClick={handlePullFromSheet}
+                disabled={Boolean(sheetBusy) || !hasUnifiedDb}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/15 px-4 py-2.5 text-xs font-bold text-amber-300 hover:bg-amber-500/25 disabled:opacity-40"
+              >
+                <RefreshCw className={`h-4 w-4 ${sheetBusy === 'pull' ? 'animate-spin' : ''}`} />
+                <span>從專屬分頁拉取最新異動</span>
+              </button>
+
+              {googleCreds.masterSheetUrl && (
                 <a
-                  href={event.sheet_url}
+                  href={googleCreds.masterSheetUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-4 py-2.5 text-xs font-bold text-emerald-300 hover:bg-emerald-500/25"
                 >
                   <ExternalLink className="h-4 w-4" />
-                  <span>開啟 Google 試算表</span>
+                  <span>開啟平台統一母試算表（總管）</span>
                 </a>
               )}
             </div>
@@ -983,7 +965,7 @@ export default function AdminEventEditorPage() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="搜尋參賽編號、報名序號、姓名、電話或身分證..."
+                placeholder="搜尋序號、姓名、團體名稱、團報代碼或匯款後五碼..."
                 className="w-full sm:w-80 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-white focus:border-lime-400 focus:outline-none"
               />
 
@@ -1010,7 +992,7 @@ export default function AdminEventEditorPage() {
                 <button
                   type="button"
                   onClick={handlePullFromSheet}
-                  disabled={Boolean(sheetBusy) || event.sheet_sync_mode === 'local'}
+                  disabled={Boolean(sheetBusy) || !hasUnifiedDb}
                   className="inline-flex items-center gap-1.5 rounded-xl border border-sky-500/40 bg-sky-500/15 px-3.5 py-2 text-xs font-bold text-sky-300 hover:bg-sky-500/25 disabled:opacity-40"
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${sheetBusy === 'pull' ? 'animate-spin' : ''}`} />
@@ -1020,7 +1002,7 @@ export default function AdminEventEditorPage() {
                 <button
                   type="button"
                   onClick={handleRetrySync}
-                  disabled={Boolean(sheetBusy) || event.sheet_sync_mode === 'local'}
+                  disabled={Boolean(sheetBusy) || !hasUnifiedDb}
                   className="inline-flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3.5 py-2 text-xs font-bold text-amber-300 hover:bg-amber-500/25 disabled:opacity-40"
                 >
                   <Upload className="h-3.5 w-3.5" />
@@ -1043,10 +1025,11 @@ export default function AdminEventEditorPage() {
                 <thead className="border-b border-slate-800 bg-slate-950/85 text-xs uppercase text-slate-400">
                   <tr>
                     <th className="px-4 py-3">參賽編號 (Bib)</th>
-                    <th className="px-4 py-3">報名序號</th>
+                    <th className="px-4 py-3">報名序號 / 團別</th>
                     <th className="px-4 py-3">跑者姓名 / 隱碼證號</th>
                     <th className="px-4 py-3">組別代碼</th>
                     <th className="px-4 py-3">應繳金額</th>
+                    <th className="px-4 py-3">匯款方式 / 後五碼</th>
                     <th className="px-4 py-3">繳費狀態</th>
                     <th className="px-4 py-3">試算表同步</th>
                     <th className="px-4 py-3 text-right">明細</th>
@@ -1055,7 +1038,7 @@ export default function AdminEventEditorPage() {
                 <tbody className="divide-y divide-slate-800">
                   {filteredRegs.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-10 text-center text-slate-500">
+                      <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
                         查無符合條件的報名資料。
                       </td>
                     </tr>
@@ -1104,6 +1087,17 @@ export default function AdminEventEditorPage() {
                         </td>
                         <td className="px-4 py-3 font-mono-num font-bold text-sky-300 whitespace-nowrap">
                           {reg.reg_code}
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1 font-sans">
+                            {reg.reg_type === 'group' ? (
+                              <span className="rounded bg-purple-500/20 border border-purple-400/40 px-1.5 py-0.5 text-[10px] font-bold text-purple-200">
+                                團報：{reg.group_name || reg.group_code}
+                              </span>
+                            ) : (
+                              <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400">
+                                個人{reg.group_name ? ` · ${reg.group_name}` : ''}
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[10px] font-normal text-slate-500">{reg.created_at}</div>
                         </td>
                         <td className="px-4 py-3 font-semibold text-white">
@@ -1119,6 +1113,37 @@ export default function AdminEventEditorPage() {
                         </td>
                         <td className="px-4 py-3 font-mono-num font-bold text-amber-300 whitespace-nowrap">
                           NT$ {Number(reg.total_amount || 0).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 font-mono-num whitespace-nowrap">
+                          <div className="flex flex-col gap-1">
+                            <span
+                              className={`inline-block w-fit rounded px-1.5 py-0.5 font-sans text-[10px] font-bold ${
+                                reg.payment_mode === 'group'
+                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-400/35'
+                                  : 'bg-slate-800 text-slate-300'
+                              }`}
+                            >
+                              {reg.payment_mode === 'group' ? '團體匯款' : '個別匯款'}
+                            </span>
+                            {reg.remittance_last5 ? (
+                              <span className="inline-block w-fit rounded-md border border-sky-500/40 bg-sky-500/15 px-2 py-0.5 text-xs font-black text-sky-300">
+                                {reg.remittance_last5}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-slate-500">未填後五碼</span>
+                            )}
+                            {reg.group_code && reg.payment_status !== '已繳費' && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleGroupPaymentStatus(reg.group_code, reg.group_name, '已繳費')
+                                }
+                                className="w-fit rounded bg-emerald-500/20 border border-emerald-400/40 px-1.5 py-0.5 font-sans text-[10px] font-bold text-emerald-300 hover:bg-emerald-500/30"
+                              >
+                                整團設已繳費
+                              </button>
+                            )}
+                          </div>
                         </td>
                         <td className="px-4 py-3">
                           <select
