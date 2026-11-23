@@ -138,18 +138,31 @@ router.post('/', async (req, res) => {
   }
   const sheetTabName = String(body.sheet_tab_name || '報名資料').trim() || '報名資料';
 
+  const eventType = ['distance', 'lap_timed'].includes(body.event_type)
+    ? body.event_type
+    : 'distance';
+  const timingEventId = String(body.timing_event_id || slug).trim();
+  const timingPortalUrl = String(body.timing_portal_url || 'https://runchip-timing.vercel.app/').trim();
+  const timingGasUrl = String(body.timing_gas_url || '').trim();
+
   const stmt = db.prepare(`
     INSERT INTO events (
-      slug, name, event_date, location, reg_start_at, reg_end_at,
+      slug, name, english_name, event_type, timing_event_id, timing_portal_url, timing_gas_url,
+      event_date, location, reg_start_at, reg_end_at,
       max_participants, is_active, banner_title, banner_subtitle,
       banner_image_url, description, payment_info,
       sheet_sync_mode, sheet_id, sheet_url, sheet_tab_name, gas_webhook_url, fields_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const info = stmt.run(
     slug,
     name,
+    String(body.english_name || '').trim(),
+    eventType,
+    timingEventId,
+    timingPortalUrl,
+    timingGasUrl,
     String(body.event_date || defaultEventDate),
     String(body.location || ''),
     String(body.reg_start_at || defaultStart),
@@ -157,10 +170,10 @@ router.post('/', async (req, res) => {
     Math.max(0, Number(body.max_participants || 0)),
     body.is_active === false ? 0 : 1,
     String(body.banner_title || name),
-    String(body.banner_subtitle || '熱血開跑・突破自我極限'),
+    String(body.banner_subtitle || 'Taiwan Ultra Runners 官方賽事｜熱血開跑・突破自我極限'),
     String(body.banner_image_url || 'https://images.unsplash.com/photo-1513593771513-7b58b6c4af38?auto=format&fit=crop&w=1600&q=80'),
     String(body.description || ''),
-    String(body.payment_info || '報名完成後請依指定帳戶完成繳費，並保留報名序號以便核對。'),
+    String(body.payment_info || '報名完成後請依指定帳戶完成繳費，並保留報名序號以便核對與分配參賽編號。'),
     sheetSyncMode,
     sheetId,
     sheetUrl || (sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit` : ''),
@@ -234,10 +247,19 @@ router.put('/:id', async (req, res) => {
     ? (String(body.sheet_tab_name).trim() || '報名資料')
     : existing.sheet_tab_name;
 
+  const nextEventType = ['distance', 'lap_timed'].includes(body.event_type)
+    ? body.event_type
+    : existing.event_type || 'distance';
+
   db.prepare(`
     UPDATE events SET
       slug = ?,
       name = ?,
+      english_name = ?,
+      event_type = ?,
+      timing_event_id = ?,
+      timing_portal_url = ?,
+      timing_gas_url = ?,
       event_date = ?,
       location = ?,
       reg_start_at = ?,
@@ -260,6 +282,11 @@ router.put('/:id', async (req, res) => {
   `).run(
     slug,
     name,
+    body.english_name !== undefined ? String(body.english_name).trim() : (existing.english_name || ''),
+    nextEventType,
+    body.timing_event_id !== undefined ? String(body.timing_event_id).trim() : (existing.timing_event_id || slug),
+    body.timing_portal_url !== undefined ? String(body.timing_portal_url).trim() : (existing.timing_portal_url || 'https://runchip-timing.vercel.app/'),
+    body.timing_gas_url !== undefined ? String(body.timing_gas_url).trim() : (existing.timing_gas_url || ''),
     body.event_date !== undefined ? String(body.event_date) : existing.event_date,
     body.location !== undefined ? String(body.location) : existing.location,
     body.reg_start_at !== undefined ? String(body.reg_start_at) : existing.reg_start_at,

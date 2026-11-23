@@ -5,6 +5,7 @@ const {
   extractRunnerSummary,
 } = require('../services/validation');
 const { appendRegistrationToSheet } = require('../services/googleSheets');
+const { maskIdNumber, resolveCategoryMeta } = require('../services/chipBridge');
 
 const router = express.Router();
 
@@ -52,6 +53,10 @@ function serializePublicEvent(event) {
     id: event.id,
     slug: event.slug,
     name: event.name,
+    english_name: event.english_name || '',
+    event_type: event.event_type || 'distance',
+    timing_event_id: event.timing_event_id || event.slug,
+    timing_portal_url: event.timing_portal_url || 'https://runchip-timing.vercel.app/',
     event_date: event.event_date,
     location: event.location,
     reg_start_at: event.reg_start_at,
@@ -142,25 +147,27 @@ router.post('/events/:slug/register', async (req, res) => {
     }
   }
 
-  // 3. 產生專屬報名序號（例：RUN26-0003）
+  // 3. 產生專屬報名序號（例：TUR26-0003）並解析晶片組別代碼
   const yearShort = String(new Date().getFullYear()).slice(-2);
   const seqNum = String(currentCount + 1).padStart(4, '0');
-  let regCode = `RUN${yearShort}-${seqNum}`;
+  let regCode = `TUR${yearShort}-${seqNum}`;
   if (db.prepare('SELECT id FROM registrations WHERE reg_code = ?').get(regCode)) {
-    regCode = `RUN${yearShort}-${seqNum}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+    regCode = `TUR${yearShort}-${seqNum}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
   }
+  const catMeta = resolveCategoryMeta(fields, result.cleanAnswers);
 
   // 4. 先寫入本地 SQLite 確保不掉單
   const insertInfo = db
     .prepare(`
       INSERT INTO registrations (
-        event_id, reg_code, runner_name, runner_id_number, runner_email, runner_phone,
+        event_id, reg_code, category_code, runner_name, runner_id_number, runner_email, runner_phone,
         answers_json, price_breakdown_json, total_amount, payment_status, sheet_sync_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '待繳費', ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '待繳費', ?)
     `)
     .run(
       event.id,
       regCode,
+      catMeta.categoryCode || '',
       summary.runnerName,
       summary.runnerIdNumber,
       summary.runnerEmail,
@@ -203,6 +210,8 @@ router.post('/events/:slug/register', async (req, res) => {
     message: '報名成功！',
     registration: {
       reg_code: savedReg.reg_code,
+      category_code: savedReg.category_code || '',
+      id_masked: maskIdNumber(summary.runnerIdNumber),
       created_at: savedReg.created_at,
       total_amount: savedReg.total_amount,
       payment_status: savedReg.payment_status,
@@ -213,9 +222,11 @@ router.post('/events/:slug/register', async (req, res) => {
     },
     event: {
       name: event.name,
+      english_name: event.english_name || '',
       event_date: event.event_date,
       location: event.location,
       payment_info: event.payment_info,
+      timing_portal_url: event.timing_portal_url || 'https://runchip-timing.vercel.app/',
     },
   });
 });

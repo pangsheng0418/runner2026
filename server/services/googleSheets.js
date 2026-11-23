@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
 
-const SYSTEM_HEADERS = ['報名序號', '報名時間', '應繳總金額', '繳費狀態'];
+const SYSTEM_HEADERS = ['報名序號', '參賽編號', '分組代碼', '報名時間', '應繳總金額', '繳費狀態'];
 
 /**
  * 從完整 Google Sheets 網址或純 ID 擷取 Spreadsheet ID
@@ -577,6 +577,8 @@ async function appendRegistrationToSheet(event, fields, registration) {
   // 建立「表頭名稱 -> 欄位值」對照表
   const valueByHeader = {
     '報名序號': registration.reg_code,
+    '參賽編號': registration.bib_number || '',
+    '分組代碼': registration.category_code || '',
     '報名時間': registration.created_at,
     '應繳總金額': registration.total_amount,
     '繳費狀態': registration.payment_status || '待繳費',

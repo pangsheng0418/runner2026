@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  Flame,
   Plus,
   ExternalLink,
   Copy,
@@ -15,9 +14,12 @@ import {
   LogOut,
   FileSpreadsheet,
   AlertTriangle,
+  Cpu,
   X,
 } from 'lucide-react';
 import { apiRequest, setAdminToken } from '../api/client';
+import TurHeader from '../components/TurHeader';
+import TurFooter from '../components/TurFooter';
 
 export default function AdminDashboardPage() {
   const navigate = useNavigate();
@@ -32,7 +34,10 @@ export default function AdminDashboardPage() {
   const [creating, setCreating] = useState(false);
   const [newForm, setNewForm] = useState({
     name: '',
+    english_name: '',
     slug: '',
+    event_type: 'distance',
+    timing_event_id: '',
     event_date: new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10),
     location: '',
     max_participants: 300,
@@ -134,91 +139,71 @@ export default function AdminDashboardPage() {
   const totalSyncErrors = events.reduce((acc, ev) => acc + Number(ev.sync_error_count || 0), 0);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 pb-16">
-      {/* 頂部導覽列 */}
-      <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-950/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 sm:px-6 py-3.5">
-          <div className="flex items-center gap-3">
-            <Link to="/admin" className="flex items-center gap-2">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-orange-500 to-amber-500 text-slate-950">
-                <Flame className="h-5 w-5 fill-slate-950" />
-              </span>
-              <div>
-                <span className="font-display text-lg font-bold tracking-wider text-white">
-                  RUN<span className="text-orange-500">FLOW</span> ADMIN
-                </span>
-                <p className="text-[10px] text-slate-400">路跑報名與試算表同步管理後台</p>
-              </div>
-            </Link>
-          </div>
+    <div className="min-h-screen flex flex-col">
+      <TurHeader
+        title="TUR 報名系統管理後台"
+        subtitle="活動表單設計・Google 試算表雙向同步・獨立晶片計時名單串接"
+        statusLabel="管理員已驗證"
+        showAdminLink={false}
+        showHomeLink
+        rightSlot={
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-bold text-slate-300 hover:border-rose-500 hover:text-rose-400 transition"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            <span>登出</span>
+          </button>
+        }
+      />
 
-          <div className="flex items-center gap-2 sm:gap-3">
-            <Link
-              to="/"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-bold text-slate-300 hover:border-sky-500 hover:text-sky-300"
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">檢視前台</span>
-            </Link>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-bold text-slate-300 hover:border-rose-500 hover:text-rose-400"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              <span>登出</span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Toast 提示 */}
       {toast && (
-        <div className="fixed bottom-5 right-5 z-50 rounded-xl border border-orange-500/50 bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-2xl">
+        <div className="fixed bottom-5 right-5 z-50 rounded-xl border border-lime-400/50 bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-2xl">
           {toast}
         </div>
       )}
 
-      <main className="mx-auto max-w-7xl px-4 sm:px-6 pt-8 space-y-8">
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 sm:px-6 pt-8 space-y-8">
         {/* KPI 總覽卡 */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5">
+          <div className="tur-control-bar rounded-2xl p-5">
             <p className="text-xs font-bold uppercase tracking-wider text-slate-400">總活動場數</p>
-            <p className="mt-2 font-mono text-3xl font-black text-white">{events.length}</p>
+            <p className="mt-2 font-mono-num text-3xl font-black text-white">{events.length}</p>
             <p className="mt-1 text-xs text-emerald-400">
               開放中：{events.filter((e) => e.is_active).length} 場
             </p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5">
+          <div className="tur-control-bar rounded-2xl p-5">
             <p className="text-xs font-bold uppercase tracking-wider text-slate-400">累計報名跑者</p>
-            <p className="mt-2 font-mono text-3xl font-black text-orange-400">{totalRunners}</p>
+            <p className="mt-2 font-mono-num text-3xl font-black text-lime-400">{totalRunners}</p>
             <p className="mt-1 text-xs text-slate-400 flex items-center gap-1">
-              <Users className="h-3.5 w-3.5" /> 跨所有活動統計
+              <Users className="h-3.5 w-3.5 text-sky-400" /> 跨所有活動統計
             </p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5">
+          <div className="tur-control-bar rounded-2xl p-5">
             <p className="text-xs font-bold uppercase tracking-wider text-slate-400">累計應收報名費</p>
-            <p className="mt-2 font-mono text-3xl font-black text-sky-400">
+            <p className="mt-2 font-mono-num text-3xl font-black text-amber-300">
               NT$ {totalRevenue.toLocaleString()}
             </p>
             <p className="mt-1 text-xs text-slate-400 flex items-center gap-1">
-              <DollarSign className="h-3.5 w-3.5" /> 含組別與加購金額
+              <DollarSign className="h-3.5 w-3.5 text-amber-400" /> 含組別與加購金額
             </p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5">
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Google Sheets API 憑證</p>
-            <p className="mt-2 text-lg font-bold text-white flex items-center gap-2">
+          <div className="tur-control-bar rounded-2xl p-5">
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Google Sheets 憑證</p>
+            <p className="mt-2 text-base font-black text-white flex items-center gap-2">
               <FileSpreadsheet
                 className={`h-5 w-5 ${googleCreds.configured ? 'text-emerald-400' : 'text-amber-400'}`}
               />
-              <span>{googleCreds.configured ? '已就緒（支援自動建表）' : '未設定 JSON（可用 GAS）'}</span>
+              <span>{googleCreds.configured ? '已就緒（支援建分頁）' : '未設定（可用 GAS）'}</span>
             </p>
             {totalSyncErrors > 0 ? (
               <p className="mt-1 text-xs text-rose-400 flex items-center gap-1">
                 <AlertTriangle className="h-3.5 w-3.5" /> 有 {totalSyncErrors} 筆待補送同步
               </p>
             ) : (
-              <p className="mt-1 text-xs text-slate-400 truncate">
+              <p className="mt-1 text-xs text-slate-400 truncate font-mono-num">
                 {googleCreds.serviceAccountEmail || '詳見 docs/GOOGLE_SHEETS_SETUP.md'}
               </p>
             )}
@@ -228,15 +213,15 @@ export default function AdminDashboardPage() {
         {/* 活動管理標題與發起按鈕 */}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="font-display text-2xl font-bold text-white">路跑活動管理清單</h1>
+            <h1 className="text-2xl font-black tracking-wide text-white">TUR 路跑活動管理清單</h1>
             <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-              建立活動將自動帶入完整路跑標準欄位，可於編輯頁自訂橫幅、拖曳表單與綁定獨立試算表。
+              建立活動自動載入 TUR 標準欄位（含晶片組別代碼、居住縣市與國籍），可一鍵自動配號與匯出晶片計時名單。
             </p>
           </div>
           <button
             type="button"
             onClick={() => setShowCreate(true)}
-            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 px-5 py-3 text-sm font-black text-slate-950 hover:from-orange-400 hover:to-orange-500 shadow-lg shadow-orange-500/20 transition"
+            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 px-5 py-3 text-sm font-black text-slate-950 hover:from-emerald-400 hover:to-lime-300 shadow-lg shadow-emerald-950/50 transition"
           >
             <Plus className="h-4 w-4 stroke-[3]" />
             <span>發起新路跑活動</span>
@@ -251,12 +236,12 @@ export default function AdminDashboardPage() {
             ))}
           </div>
         ) : events.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-700 bg-slate-900/50 p-12 text-center">
+          <div className="tur-control-bar rounded-2xl p-12 text-center">
             <p className="text-slate-400 mb-4">目前尚未建立任何路跑活動。</p>
             <button
               type="button"
               onClick={() => setShowCreate(true)}
-              className="rounded-xl bg-orange-500 px-5 py-2.5 text-sm font-bold text-slate-950 hover:bg-orange-400"
+              className="rounded-xl bg-emerald-500 px-5 py-2.5 text-sm font-black text-slate-950 hover:bg-emerald-400"
             >
               立即發起第一場活動
             </button>
@@ -275,7 +260,7 @@ export default function AdminDashboardPage() {
               return (
                 <div
                   key={ev.id}
-                  className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 hover:border-slate-700 transition"
+                  className="tur-card rounded-2xl border border-slate-800 bg-slate-900/90 p-5 hover:border-lime-400/40 transition"
                 >
                   <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                     <div className="flex items-start gap-4">
@@ -301,6 +286,10 @@ export default function AdminDashboardPage() {
                           <span className="rounded-full bg-sky-500/15 border border-sky-500/30 px-2.5 py-0.5 text-[11px] font-semibold text-sky-300">
                             {syncLabel}
                           </span>
+                          <span className="inline-flex items-center gap-1 rounded-full bg-lime-500/15 border border-lime-400/30 px-2.5 py-0.5 font-mono-num text-[11px] font-semibold text-lime-300">
+                            <Cpu className="h-3 w-3" />
+                            {ev.event_type === 'lap_timed' ? '繞圈限時' : '距離賽'} · {ev.timing_event_id || ev.slug}
+                          </span>
                           {ev.sync_error_count > 0 && (
                             <span className="rounded-full bg-rose-500/20 border border-rose-500/40 px-2.5 py-0.5 text-[11px] font-bold text-rose-300">
                               {ev.sync_error_count} 筆同步異常
@@ -308,11 +297,11 @@ export default function AdminDashboardPage() {
                           )}
                         </div>
 
-                        <h2 className="font-display text-xl font-bold text-white">{ev.name}</h2>
+                        <h2 className="text-xl font-black text-white">{ev.name}</h2>
 
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
                           <span className="flex items-center gap-1">
-                            <Calendar className="h-3.5 w-3.5 text-orange-400" />
+                            <Calendar className="h-3.5 w-3.5 text-lime-400" />
                             活動日期：{ev.event_date}
                           </span>
                           <span className="flex items-center gap-1">
@@ -320,7 +309,7 @@ export default function AdminDashboardPage() {
                             已報名：{ev.registration_count}
                             {ev.max_participants > 0 ? ` / ${ev.max_participants} 人` : ' 人'}
                           </span>
-                          <span className="font-mono text-orange-300 font-semibold">
+                          <span className="font-mono-num text-amber-300 font-bold">
                             累計 NT$ {Number(ev.total_revenue || 0).toLocaleString()}
                           </span>
                         </div>
@@ -355,10 +344,10 @@ export default function AdminDashboardPage() {
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
                       <Link
                         to={`/admin/events/${ev.id}`}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-orange-500 px-4 py-2.5 text-xs font-black text-slate-950 hover:bg-orange-400 transition"
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-sky-500 to-cyan-400 px-4 py-2.5 text-xs font-black text-slate-950 hover:from-sky-400 hover:to-cyan-300 transition"
                       >
                         <Edit3 className="h-3.5 w-3.5" />
-                        <span>管理設定 / 表單 / 名單</span>
+                        <span>管理設定 / 表單 / 晶片串接</span>
                       </Link>
                       <Link
                         to={publicPath}
@@ -397,12 +386,14 @@ export default function AdminDashboardPage() {
         )}
       </main>
 
+      <TurFooter />
+
       {/* 新增活動 Modal */}
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden">
+          <div className="tur-control-bar w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
-              <h2 className="font-display text-lg font-bold text-white">發起新路跑活動</h2>
+              <h2 className="text-lg font-black text-white">發起新 TUR 路跑活動</h2>
               <button
                 type="button"
                 onClick={() => setShowCreate(false)}
@@ -419,22 +410,63 @@ export default function AdminDashboardPage() {
                   required
                   value={newForm.name}
                   onChange={(e) => setNewForm({ ...newForm, name: e.target.value })}
-                  placeholder="例如：2026 高雄港灣夜間星光路跑"
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-orange-500 focus:outline-none"
+                  placeholder="例如：2026 TUR 八百壯士極東霸主超級馬拉松"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">
+                  英文賽事名稱（選填・供晶片系統雙語證書使用）
+                </label>
+                <input
+                  type="text"
+                  value={newForm.english_name}
+                  onChange={(e) => setNewForm({ ...newForm, english_name: e.target.value })}
+                  placeholder="例如：2026 TUR ULTRA MARATHON"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-300 mb-1">
-                    專屬公開網址代碼（選填）
+                    賽事計時模式（對接晶片系統）
+                  </label>
+                  <select
+                    value={newForm.event_type}
+                    onChange={(e) => setNewForm({ ...newForm, event_type: e.target.value })}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
+                  >
+                    <option value="distance">標準距離賽 (Distance)</option>
+                    <option value="lap_timed">繞圈限時賽 (Lap Timed)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">
+                    晶片系統活動代碼（選填）
+                  </label>
+                  <input
+                    type="text"
+                    value={newForm.timing_event_id}
+                    onChange={(e) => setNewForm({ ...newForm, timing_event_id: e.target.value })}
+                    placeholder="例如：TUR-2026-ULTRA"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 font-mono-num text-sm text-lime-300 focus:border-lime-400 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">
+                    公開網址代碼（選填）
                   </label>
                   <input
                     type="text"
                     value={newForm.slug}
                     onChange={(e) => setNewForm({ ...newForm, slug: e.target.value })}
-                    placeholder="例如：kaohsiung-night-run"
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-orange-500 focus:outline-none"
+                    placeholder="例如：tur-ultra-2026"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
                   />
                 </div>
                 <div>
@@ -444,7 +476,7 @@ export default function AdminDashboardPage() {
                     required
                     value={newForm.event_date}
                     onChange={(e) => setNewForm({ ...newForm, event_date: e.target.value })}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-orange-500 focus:outline-none"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
                   />
                 </div>
               </div>
@@ -456,8 +488,8 @@ export default function AdminDashboardPage() {
                     type="text"
                     value={newForm.location}
                     onChange={(e) => setNewForm({ ...newForm, location: e.target.value })}
-                    placeholder="例如：高雄流行音樂中心廣場"
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-orange-500 focus:outline-none"
+                    placeholder="例如：台北河濱公園"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
                   />
                 </div>
                 <div>
@@ -471,13 +503,13 @@ export default function AdminDashboardPage() {
                     onChange={(e) =>
                       setNewForm({ ...newForm, max_participants: Number(e.target.value || 0) })
                     }
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-orange-500 focus:outline-none"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
                   />
                 </div>
               </div>
 
-              <p className="rounded-xl bg-sky-950/30 border border-sky-500/30 px-3.5 py-2.5 text-xs text-sky-200">
-                建立後將自動套用 12 項路跑常用預設欄位（含身分證驗證、報名組別計價、紀念衫尺寸與加購項目），並立即導向完整設計器。
+              <p className="rounded-xl bg-emerald-950/30 border border-emerald-500/30 px-3.5 py-2.5 text-xs text-emerald-200">
+                建立後將自動套用 TUR 標準表單欄位（含身分證驗證、晶片分組代碼、縣市/國籍與加購項目），與晶片系統 100% 欄位對齊！
               </p>
 
               <div className="flex justify-end gap-2 pt-2">
@@ -491,7 +523,7 @@ export default function AdminDashboardPage() {
                 <button
                   type="submit"
                   disabled={creating}
-                  className="rounded-xl bg-orange-500 px-5 py-2.5 text-xs font-black text-slate-950 hover:bg-orange-400 disabled:opacity-60"
+                  className="rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 px-5 py-2.5 text-xs font-black text-slate-950 hover:from-emerald-400 hover:to-lime-300 disabled:opacity-60"
                 >
                   {creating ? '建立中...' : '建立並進入設計器'}
                 </button>

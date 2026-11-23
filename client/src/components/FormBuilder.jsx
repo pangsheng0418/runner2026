@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { FIELD_TYPES, createBlankField } from '../utils/defaultFields';
 
-const SYSTEM_HEADERS = ['報名序號', '報名時間', '應繳總金額', '繳費狀態'];
+const SYSTEM_HEADERS = ['報名序號', '參賽編號', '分組代碼', '報名時間', '應繳總金額', '繳費狀態'];
 
 export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
   const [dragIndex, setDragIndex] = useState(null);
@@ -39,8 +39,8 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
     };
     if (meta?.hasOptions && (!current.options || current.options.length === 0)) {
       patch.options = [
-        { label: '選項一', value: '選項一', price: 0 },
-        { label: '選項二', value: '選項二', price: 0 },
+        { label: '選項一', value: '選項一', price: 0, code: '', bibPrefix: '' },
+        { label: '選項二', value: '選項二', price: 0, code: '', bibPrefix: '' },
       ];
     }
     if (nextType === 'calculated') {
@@ -82,7 +82,7 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
     const count = (current.options || []).length + 1;
     const nextOptions = [
       ...(current.options || []),
-      { label: `新選項 ${count}`, value: `新選項 ${count}`, price: 0 },
+      { label: `新選項 ${count}`, value: `新選項 ${count}`, price: 0, code: '', bibPrefix: '' },
     ];
     updateField(fieldIdx, { options: nextOptions });
   };
@@ -118,7 +118,7 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
       <div className="rounded-xl border border-sky-500/30 bg-sky-950/20 p-4">
         <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-sky-300 mb-2">
           <Table2 className="h-4 w-4" />
-          <span>Google 試算表第一列（表頭）即時預覽 — 儲存後自動同步對齊</span>
+          <span>Google 試算表第一列（表頭）即時預覽 — 含參賽編號與晶片分組代碼</span>
         </div>
         <div className="flex flex-wrap gap-1.5">
           {previewHeaders.map((h, i) => (
@@ -126,7 +126,7 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
               key={i}
               className={`rounded-md px-2.5 py-1 text-xs font-medium ${
                 i < SYSTEM_HEADERS.length
-                  ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30'
+                  ? 'bg-lime-500/15 text-lime-300 border border-lime-400/35'
                   : 'bg-slate-800 text-slate-200 border border-slate-700'
               }`}
             >
@@ -141,6 +141,7 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
         {fields.map((field, idx) => {
           const typeMeta = FIELD_TYPES.find((t) => t.value === field.type) || FIELD_TYPES[0];
           const isDragging = dragIndex === idx;
+          const isCategoryField = field.id === 'race_category' || String(field.label || '').includes('組別');
 
           return (
             <div
@@ -155,9 +156,9 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
                 setDragIndex(null);
               }}
               onDragEnd={() => setDragIndex(null)}
-              className={`rounded-xl border bg-slate-900/90 p-4 transition ${
+              className={`tur-card rounded-xl border bg-slate-900/90 p-4 transition ${
                 isDragging
-                  ? 'border-orange-500 opacity-60 scale-[0.99]'
+                  ? 'border-lime-400 opacity-60 scale-[0.99]'
                   : 'border-slate-700/80 hover:border-slate-600'
               }`}
             >
@@ -166,17 +167,22 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
                 <div className="flex items-center gap-2">
                   <span
                     title="按住拖曳調整順序"
-                    className="cursor-grab text-slate-500 hover:text-orange-400 active:cursor-grabbing"
+                    className="cursor-grab text-slate-500 hover:text-lime-400 active:cursor-grabbing"
                   >
                     <GripVertical className="h-5 w-5" />
                   </span>
-                  <span className="rounded bg-slate-800 px-2 py-0.5 font-mono text-xs font-bold text-orange-400">
+                  <span className="rounded bg-slate-800 px-2 py-0.5 font-mono-num text-xs font-bold text-lime-400">
                     #{idx + 1}
                   </span>
                   <span className="font-bold text-sm text-white">{field.label || '未命名欄位'}</span>
                   {field.required && (
                     <span className="rounded bg-rose-500/20 px-1.5 py-0.5 text-[10px] font-bold text-rose-300">
                       必填
+                    </span>
+                  )}
+                  {isCategoryField && (
+                    <span className="rounded bg-emerald-500/20 border border-emerald-400/35 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">
+                      晶片組別對應欄
                     </span>
                   )}
                 </div>
@@ -229,7 +235,7 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
                     type="text"
                     value={field.label}
                     onChange={(e) => updateField(idx, { label: e.target.value })}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none"
+                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-lime-400 focus:outline-none"
                   />
                 </div>
 
@@ -238,7 +244,7 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
                   <select
                     value={field.type}
                     onChange={(e) => handleTypeChange(idx, e.target.value)}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none"
+                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-lime-400 focus:outline-none"
                   >
                     {FIELD_TYPES.map((t) => (
                       <option key={t.value} value={t.value}>
@@ -255,7 +261,7 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
                         type="checkbox"
                         checked={Boolean(field.required)}
                         onChange={(e) => updateField(idx, { required: e.target.checked })}
-                        className="h-4 w-4 accent-orange-500"
+                        className="h-4 w-4 accent-lime-400"
                       />
                       <span>設為必填</span>
                     </label>
@@ -264,7 +270,7 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
 
                 {typeMeta.hasUnitPrice && (
                   <div className="md:col-span-2">
-                    <label className="block text-xs font-semibold text-orange-300 mb-1">
+                    <label className="block text-xs font-semibold text-amber-300 mb-1">
                       單價（NT$）
                     </label>
                     <input
@@ -272,7 +278,7 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
                       min={0}
                       value={field.unitPrice || 0}
                       onChange={(e) => updateField(idx, { unitPrice: Number(e.target.value || 0) })}
-                      className="w-full rounded-lg border border-orange-500/40 bg-slate-950 px-3 py-2 font-mono text-sm text-orange-300 focus:border-orange-500 focus:outline-none"
+                      className="w-full rounded-lg border border-amber-500/40 bg-slate-950 px-3 py-2 font-mono-num text-sm text-amber-300 focus:border-amber-400 focus:outline-none"
                     />
                   </div>
                 )}
@@ -290,7 +296,7 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
                       value={field.placeholder || ''}
                       onChange={(e) => updateField(idx, { placeholder: e.target.value })}
                       placeholder="例如：請輸入..."
-                      className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 focus:border-orange-500 focus:outline-none"
+                      className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 focus:border-lime-400 focus:outline-none"
                     />
                   </div>
                 )}
@@ -303,18 +309,18 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
                     value={field.helperText || ''}
                     onChange={(e) => updateField(idx, { helperText: e.target.value })}
                     placeholder="選填說明文字"
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 focus:border-orange-500 focus:outline-none"
+                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 focus:border-lime-400 focus:outline-none"
                   />
                 </div>
               </div>
 
               {/* 選項與金額設定（Select / Radio / Checkbox） */}
               {typeMeta.hasOptions && (
-                <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950/70 p-3">
-                  <div className="flex items-center justify-between mb-2">
+                <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950/75 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                     <span className="flex items-center gap-1.5 text-xs font-bold text-slate-300">
-                      <DollarSign className="h-3.5 w-3.5 text-orange-400" />
-                      選項清單與對應加總金額（設為 0 則不計費）
+                      <DollarSign className="h-3.5 w-3.5 text-amber-400" />
+                      選項清單、加總金額{isCategoryField ? '與晶片分組代碼 / 配號前綴' : '（設為 0 則不計費）'}
                     </span>
                     <button
                       type="button"
@@ -333,8 +339,30 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
                           value={opt.label}
                           onChange={(e) => updateOption(idx, optIdx, { label: e.target.value })}
                           placeholder="選項名稱（例如：全馬 42K）"
-                          className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-white focus:border-orange-500 focus:outline-none"
+                          className="flex-1 min-w-[140px] rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-white focus:border-lime-400 focus:outline-none"
                         />
+                        {isCategoryField && (
+                          <>
+                            <input
+                              type="text"
+                              value={opt.code || ''}
+                              onChange={(e) => updateOption(idx, optIdx, { code: e.target.value })}
+                              placeholder="晶片代碼(42K)"
+                              title="對應 TUR 晶片計時系統的 categoryId（如 42K, 21K, 6H）"
+                              className="w-24 rounded-lg border border-emerald-500/40 bg-slate-900 px-2.5 py-1.5 font-mono-num text-xs text-emerald-300 focus:border-emerald-400 focus:outline-none"
+                            />
+                            <input
+                              type="text"
+                              value={opt.bibPrefix || ''}
+                              onChange={(e) =>
+                                updateOption(idx, optIdx, { bibPrefix: e.target.value.toUpperCase() })
+                              }
+                              placeholder="前綴(A)"
+                              title="自動配號的號碼布前綴（如 A -> A001, A002）"
+                              className="w-16 rounded-lg border border-sky-500/40 bg-slate-900 px-2 py-1.5 font-mono-num text-xs text-sky-300 focus:border-sky-400 focus:outline-none"
+                            />
+                          </>
+                        )}
                         <div className="flex items-center gap-1.5">
                           <span className="text-xs text-slate-400">NT$</span>
                           <input
@@ -344,7 +372,7 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
                             onChange={(e) =>
                               updateOption(idx, optIdx, { price: Number(e.target.value || 0) })
                             }
-                            className="w-24 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 font-mono text-xs text-orange-300 focus:border-orange-500 focus:outline-none"
+                            className="w-24 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 font-mono-num text-xs text-amber-300 focus:border-amber-400 focus:outline-none"
                           />
                         </div>
                         <button
@@ -371,7 +399,7 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
           <select
             value={newFieldType}
             onChange={(e) => setNewFieldType(e.target.value)}
-            className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none"
+            className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-lime-400 focus:outline-none"
           >
             {FIELD_TYPES.map((t) => (
               <option key={t.value} value={t.value}>
@@ -382,7 +410,7 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
           <button
             type="button"
             onClick={addField}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-orange-500 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-orange-400 transition"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-black text-slate-950 hover:bg-emerald-400 transition"
           >
             <Plus className="h-4 w-4" />
             新增表單欄位
@@ -396,7 +424,7 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700 transition"
           >
             <RotateCcw className="h-3.5 w-3.5" />
-            套用路跑標準預設欄位
+            套用 TUR 路跑標準預設欄位
           </button>
         )}
       </div>

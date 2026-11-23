@@ -59,6 +59,11 @@ db.exec(`
     sheet_url TEXT NOT NULL DEFAULT '',
     sheet_tab_name TEXT NOT NULL DEFAULT '報名資料',
     gas_webhook_url TEXT NOT NULL DEFAULT '',
+    english_name TEXT NOT NULL DEFAULT '',
+    event_type TEXT NOT NULL DEFAULT 'distance',
+    timing_event_id TEXT NOT NULL DEFAULT '',
+    timing_portal_url TEXT NOT NULL DEFAULT 'https://runchip-timing.vercel.app/',
+    timing_gas_url TEXT NOT NULL DEFAULT '',
     fields_json TEXT NOT NULL DEFAULT '[]',
     last_sheet_sync_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
@@ -69,6 +74,8 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id INTEGER NOT NULL,
     reg_code TEXT UNIQUE NOT NULL,
+    bib_number TEXT NOT NULL DEFAULT '',
+    category_code TEXT NOT NULL DEFAULT '',
     runner_name TEXT NOT NULL DEFAULT '',
     runner_id_number TEXT NOT NULL DEFAULT '',
     runner_email TEXT NOT NULL DEFAULT '',
@@ -87,6 +94,21 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_registrations_event_id ON registrations(event_id);
   CREATE INDEX IF NOT EXISTS idx_registrations_reg_code ON registrations(reg_code);
 `);
+
+// 向下相容自動遷移：舊資料庫自動補齊 TUR 晶片串接欄位
+function ensureColumn(table, column, definition) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+  }
+}
+ensureColumn('events', 'english_name', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('events', 'event_type', "TEXT NOT NULL DEFAULT 'distance'");
+ensureColumn('events', 'timing_event_id', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('events', 'timing_portal_url', "TEXT NOT NULL DEFAULT 'https://runchip-timing.vercel.app/'");
+ensureColumn('events', 'timing_gas_url', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('registrations', 'bib_number', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('registrations', 'category_code', "TEXT NOT NULL DEFAULT ''");
 
 /**
  * 路跑活動標準預設欄位範本（建立新活動時自動帶入）
@@ -135,7 +157,29 @@ function getDefaultRunningFields() {
       type: 'date',
       required: true,
       placeholder: '',
-      helperText: '將用於賽會保險投保與年齡分組計算',
+      helperText: '將用於賽會保險投保、TUR 晶片成績與 DUV 國際認證',
+      options: [],
+      unitPrice: 0,
+      validation: 'none',
+    },
+    {
+      id: 'city',
+      label: '居住縣市',
+      type: 'text',
+      required: false,
+      placeholder: '例如：台北市、台中市、高雄市',
+      helperText: '選填；供晶片計時名單與 DUV 超馬成績登錄使用',
+      options: [],
+      unitPrice: 0,
+      validation: 'none',
+    },
+    {
+      id: 'country',
+      label: '國籍代碼',
+      type: 'text',
+      required: false,
+      placeholder: '例如：TPE（台灣）、JPN、USA',
+      helperText: '選填；預設 TPE（供雙語完賽證書與國際登錄使用）',
       options: [],
       unitPrice: 0,
       validation: 'none',
@@ -190,12 +234,13 @@ function getDefaultRunningFields() {
       type: 'select',
       required: true,
       placeholder: '請選擇參賽組別',
-      helperText: '費用包含賽道補給、晶片計時、賽事紀念衫與完賽獎牌',
+      helperText: '費用包含賽道補給、TUR Web NFC 晶片計時、賽事紀念衫與中英文完賽證書',
       options: [
-        { label: '全馬 42K', value: '全馬 42K', price: 1200 },
-        { label: '半馬 21K', value: '半馬 21K', price: 1000 },
-        { label: '挑戰組 10K', value: '挑戰組 10K', price: 800 },
-        { label: '健康組 5K', value: '健康組 5K', price: 600 },
+        { label: '超馬 50K', value: '超馬 50K', price: 1500, code: '50K', bibPrefix: 'A' },
+        { label: '全馬 42K', value: '全馬 42K', price: 1200, code: '42K', bibPrefix: 'B' },
+        { label: '半馬 21K', value: '半馬 21K', price: 1000, code: '21K', bibPrefix: 'C' },
+        { label: '挑戰組 10K', value: '挑戰組 10K', price: 800, code: '10K', bibPrefix: 'D' },
+        { label: '健康組 5K', value: '健康組 5K', price: 600, code: '5K', bibPrefix: 'E' },
       ],
       unitPrice: 0,
       validation: 'none',
@@ -285,11 +330,12 @@ function seedInitialData() {
 
     const insertEvent = db.prepare(`
       INSERT INTO events (
-        slug, name, event_date, location, reg_start_at, reg_end_at,
+        slug, name, english_name, event_type, timing_event_id, timing_portal_url, timing_gas_url,
+        event_date, location, reg_start_at, reg_end_at,
         max_participants, is_active, banner_title, banner_subtitle,
         banner_image_url, description, payment_info,
         sheet_sync_mode, sheet_id, sheet_url, sheet_tab_name, gas_webhook_url, fields_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const rawMasterSheet = String(
@@ -304,38 +350,45 @@ function seedInitialData() {
 
     const result = insertEvent.run(
       'taipei-speed-marathon-2026',
-      '2026 台北疾速城市馬拉松',
+      '2026 TUR 台灣超馬疾速城市挑戰賽',
+      '2026 TUR TAIWAN ULTRA SPEED CHALLENGE',
+      'distance',
+      'TUR-2026-SPEED',
+      'https://runchip-timing.vercel.app/',
+      '',
       formatDateOnly(eventDay),
       '台北市政府市民廣場（起終點）',
       formatLocalISO(start),
       formatLocalISO(end),
       500,
       1,
-      '2026 TAIPEI SPEED MARATHON',
-      '突破極限・疾速開跑｜AIMS 認證城市賽道，全馬 / 半馬 / 10K / 5K 熱血徵召中',
+      '2026 TUR 台灣超馬疾速城市挑戰賽',
+      'Taiwan Ultra Runners 官方賽事｜Web NFC 晶片即時感應・超馬 50K / 全馬 42K / 半馬 21K / 10K 熱血徵召中',
       'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&w=1600&q=80',
-      '年度最具速度感的城市路跑盛會！貫穿台北經典地標與河濱賽道，配備雙晶片即時分段計時系統、專業配速列車與頂級賽道補給。歡迎各路跑者挑戰個人最佳成績（PB）！',
-      '請於報名完成後 3 日內完成匯款，並於備註填寫「報名序號」：\n銀行代碼：822（中國信託）\n帳號：1234-5678-9012-3456\n戶名：疾速路跑賽事籌備委員會\n完成轉帳後將於 1-2 個工作天內寄發入帳確認通知。',
+      'TUR (Taiwan Ultra Runners) 年度指標性城市超級馬拉松與路跑盛會！支援共用 NFC 晶片感應計時、賽中即時里程排名與官方中英文雙語完賽證書，並可匯出 DUV 國際超馬認證成績。',
+      '請於報名完成後 3 日內完成匯款，並於備註填寫「報名序號」：\n銀行代碼：822（中國信託）\n帳號：1234-5678-9012-3456\n戶名：TUR 台灣超級馬拉松跑者協會\n完成轉帳後將於 1-2 個工作天內完成對帳並開放參賽編號配號。',
       seedSheetMode,
       seedSheetId,
       seedSheetUrl,
-      '2026 台北疾速城市馬拉松',
+      '2026 TUR 台灣超馬疾速城市挑戰賽',
       '',
       JSON.stringify(defaultFields)
     );
 
-    // 內建 2 筆範例報名資料，方便後台立即檢視效果
+    // 內建 2 筆範例報名資料，方便後台立即檢視與測試晶片匯出效果
     const eventId = result.lastInsertRowid;
     const insertReg = db.prepare(`
       INSERT INTO registrations (
-        event_id, reg_code, runner_name, runner_id_number, runner_email, runner_phone,
+        event_id, reg_code, bib_number, category_code, runner_name, runner_id_number, runner_email, runner_phone,
         answers_json, price_breakdown_json, total_amount, payment_status, sheet_sync_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     insertReg.run(
       eventId,
-      'RUN26-0001',
+      'TUR26-0001',
+      'B001',
+      '42K',
       '林志翔',
       'A123456789',
       'zhixiang.lin@example.com',
@@ -345,6 +398,8 @@ function seedInitialData() {
         gender: '男',
         id_number: 'A123456789',
         birth_date: '1993-05-18',
+        city: '台北市',
+        country: 'TPE',
         phone: '0912-345678',
         email: 'zhixiang.lin@example.com',
         emergency_name: '林美華',
@@ -366,7 +421,9 @@ function seedInitialData() {
 
     insertReg.run(
       eventId,
-      'RUN26-0002',
+      'TUR26-0002',
+      'C001',
+      '21K',
       '陳怡君',
       'F223456781',
       'yijun.chen@example.com',
@@ -376,6 +433,8 @@ function seedInitialData() {
         gender: '女',
         id_number: 'F223456781',
         birth_date: '1996-11-02',
+        city: '新北市',
+        country: 'TPE',
         phone: '0988-654321',
         email: 'yijun.chen@example.com',
         emergency_name: '陳大明',
@@ -394,7 +453,7 @@ function seedInitialData() {
       'local'
     );
 
-    console.log('[Seed] 已建立範例路跑活動：2026 台北疾速城市馬拉松');
+    console.log('[Seed] 已建立範例路跑活動：2026 TUR 台灣超馬疾速城市挑戰賽');
   }
 }
 

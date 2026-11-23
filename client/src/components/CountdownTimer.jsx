@@ -32,20 +32,24 @@ export default function CountdownTimer({ targetIso, label = '距離報名截止'
   const pad = (n) => String(n).padStart(2, '0');
 
   return (
-    <div className="inline-flex flex-wrap items-center gap-3 rounded-xl border border-orange-500/40 bg-slate-950/85 px-4 py-2.5 backdrop-blur-md shadow-lg shadow-orange-950/40">
-      <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-orange-400">
+    <div className="inline-flex flex-wrap items-center gap-3 rounded-xl border border-lime-400/35 bg-slate-950/90 px-4 py-2.5 backdrop-blur-md shadow-lg">
+      <div className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wider text-lime-400">
         <Timer className="h-4 w-4 animate-pulse" />
         <span>{time.expired ? '報名已截止' : label}</span>
       </div>
       {!time.expired && (
-        <div className="flex items-center gap-1.5 font-mono text-sm sm:text-base font-bold text-white">
-          <span className="rounded bg-slate-800 px-2 py-0.5 text-orange-400">{pad(time.days)}</span>
+        <div className="flex items-center gap-1.5 font-mono-num text-sm sm:text-base font-bold text-white">
+          <span className="rounded-md bg-slate-900 border border-slate-700 px-2 py-0.5 text-lime-300">
+            {pad(time.days)}
+          </span>
           <span className="text-xs text-slate-400">天</span>
-          <span className="rounded bg-slate-800 px-2 py-0.5">{pad(time.hours)}</span>
-          <span className="text-orange-500">:</span>
-          <span className="rounded bg-slate-800 px-2 py-0.5">{pad(time.minutes)}</span>
-          <span className="text-orange-500">:</span>
-          <span className="rounded bg-slate-800 px-2 py-0.5 text-sky-400">{pad(time.seconds)}</span>
+          <span className="rounded-md bg-slate-900 border border-slate-700 px-2 py-0.5">{pad(time.hours)}</span>
+          <span className="text-sky-400">:</span>
+          <span className="rounded-md bg-slate-900 border border-slate-700 px-2 py-0.5">{pad(time.minutes)}</span>
+          <span className="text-sky-400">:</span>
+          <span className="rounded-md bg-slate-900 border border-slate-700 px-2 py-0.5 text-amber-300">
+            {pad(time.seconds)}
+          </span>
         </div>
       )}
     </div>

@@ -1,14 +1,20 @@
-# RunFlow｜路跑活動線上報名與管理平台
+# TUR (Taiwan Ultra Runners)｜路跑活動線上報名與管理平台
 
-一套專為路跑與馬拉松賽事打造的全端報名與管理系統，具備：
-- **前台公開報名頁**：路跑運動感 RWD 介面、倒數計時器、動態表單渲染、身分證/護照防呆驗證、即時自動加總應繳金額、報名成功確認畫面。
-- **後台活動管理系統**：JWT 權限驗證、活動 CRUD、專屬公開報名網址、橫幅 Banner 自訂（支援圖片上傳與即時預覽）。
-- **動態表單設計器**：內建 12 項路跑標準預設欄位、支援拖曳排序與增刪改、選項計價自動計算、儲存自動同步 Google 試算表第一列表頭。
-- **Google 試算表雙向同步**：支援 Google Sheets API（可一鍵自動建立獨立試算表）與 Google Apps Script Webhook 兩種模式，並內建本地 SQLite 防掉單容錯與重試機制。
+一套以 **TUR (Taiwan Ultra Runners)** 官方風格打造的全端路跑報名與管理平台，具備獨立資料庫架構，並與 [TUR 晶片計時系統](https://runchip-timing.vercel.app/) 無縫對接。
+
+## 核心功能
+- **TUR 官方風格介面**：內嵌官方 Logo、深色三色光暈網格主題、戶外強光高對比模式與完整 RWD。
+- **動態表單設計器**：內建 14 項 TUR 路跑標準欄位，支援拖曳排序、選項計價自動加總、晶片組別代碼與配號前綴。
+- **Google 試算表雙向同步**：支援 Google Sheets API（一鍵建立活動專屬分頁）與 GAS Webhook 雙模式。
+- **晶片系統獨立串接**：一鍵依組別自動配號（Bib）、匯出 1:1 對應 `runchip-timing` 專用 CSV、一鍵 GAS 推送與獨立跨系統 JSON API。
+
+## 完整文件
+- **完整系統使用與技術說明書**：[docs/SYSTEM_GUIDE.md](./docs/SYSTEM_GUIDE.md)
+- **Google Sheets API & GAS 串接教學**：[docs/GOOGLE_SHEETS_SETUP.md](./docs/GOOGLE_SHEETS_SETUP.md)
 
 ## 快速啟動
 
-```bash
+```powershell
 # 1. 安裝相依套件（Windows PowerShell 請使用 npm.cmd）
 npm.cmd install
 
@@ -19,13 +25,7 @@ npm.cmd run build
 npm.cmd start
 ```
 
-啟動後開啟瀏覽器前往：
-- **前台活動首頁**：`http://localhost:3000`
+啟動後開啟瀏覽器：
+- **TUR 大廳首頁**：`http://localhost:3000`
 - **範例活動公開報名頁**：`http://localhost:3000/register/taipei-speed-marathon-2026`
-- **後台登入頁**：`http://localhost:3000/admin/login`
-  - 預設管理員帳號：`admin`
-  - 預設管理員密碼：`runner2026`
-
-## Google 試算表串接教學
-
-完整步驟請參閱 [docs/GOOGLE_SHEETS_SETUP.md](./docs/GOOGLE_SHEETS_SETUP.md)。
+- **後台登入頁**：`http://localhost:3000/admin/login`（預設測試帳密：`admin` / `runner2026`）

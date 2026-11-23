@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Flame, Lock, User, ArrowRight, AlertCircle, ArrowLeft } from 'lucide-react';
+import { Lock, User, ArrowRight, AlertCircle, ArrowLeft } from 'lucide-react';
 import { apiRequest, setAdminToken } from '../api/client';
+import TurLogo from '../components/TurLogo';
 
 export default function AdminLoginPage() {
   const navigate = useNavigate();
@@ -29,26 +30,26 @@ export default function AdminLoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 track-stripes flex flex-col justify-center px-4 py-12">
+    <div className="min-h-screen flex flex-col justify-center px-4 py-12">
       <div className="mx-auto w-full max-w-md">
         <Link
           to="/"
-          className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-orange-400 mb-6"
+          className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-lime-400 mb-6"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
-          返回前台活動首頁
+          返回 TUR 賽事報名大廳
         </Link>
 
-        <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/95 shadow-2xl">
-          <div className="h-1.5 w-full bg-gradient-to-r from-orange-500 via-amber-400 to-blue-500" />
+        <div className="tur-control-bar overflow-hidden rounded-2xl shadow-2xl">
+          <div className="tur-accent-strip w-full" />
           <div className="p-7 sm:p-8">
-            <div className="flex items-center gap-3 mb-6">
-              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 text-slate-950">
-                <Flame className="h-6 w-6 fill-slate-950" />
-              </span>
+            <div className="flex flex-col items-start gap-3 mb-6">
+              <TurLogo size="md" />
               <div>
-                <h1 className="font-display text-2xl font-bold text-white">RunFlow 後台登入</h1>
-                <p className="text-xs text-slate-400">路跑活動管理・動態表單・試算表同步</p>
+                <h1 className="text-2xl font-black tracking-wide text-white">TUR 後台管理登入</h1>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  活動報名設計・Google 試算表雙向同步・晶片計時名單對接
+                </p>
               </div>
             </div>
 
@@ -70,7 +71,7 @@ export default function AdminLoginPage() {
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     placeholder="請輸入管理員帳號"
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950 pl-10 pr-4 py-3 text-sm text-white focus:border-orange-500 focus:outline-none"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 pl-10 pr-4 py-3 text-sm text-white focus:border-lime-400 focus:outline-none"
                   />
                 </div>
               </div>
@@ -85,7 +86,7 @@ export default function AdminLoginPage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="請輸入密碼"
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950 pl-10 pr-4 py-3 text-sm text-white focus:border-orange-500 focus:outline-none"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 pl-10 pr-4 py-3 text-sm text-white focus:border-lime-400 focus:outline-none"
                   />
                 </div>
               </div>
@@ -93,17 +94,17 @@ export default function AdminLoginPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 px-5 py-3.5 text-sm font-black text-slate-950 hover:from-orange-400 hover:to-orange-500 disabled:opacity-60 transition"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 px-5 py-3.5 text-sm font-black text-slate-950 hover:from-amber-400 hover:to-yellow-300 disabled:opacity-60 transition"
               >
-                <span>{loading ? '驗證中...' : '登入後台管理中心'}</span>
+                <span>{loading ? '驗證中...' : '登入 TUR 管理後台'}</span>
                 <ArrowRight className="h-4 w-4" />
               </button>
             </form>
 
             {/* 測試用帳號提示 */}
-            <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950/70 p-3.5 text-xs text-slate-400">
+            <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950/75 p-3.5 text-xs text-slate-400">
               <p className="font-bold text-slate-300 mb-1">預設測試管理員帳號：</p>
-              <div className="flex items-center justify-between font-mono">
+              <div className="flex items-center justify-between font-mono-num">
                 <span>帳號：admin</span>
                 <span>密碼：runner2026</span>
                 <button
@@ -112,7 +113,7 @@ export default function AdminLoginPage() {
                     setUsername('admin');
                     setPassword('runner2026');
                   }}
-                  className="text-orange-400 hover:underline font-sans font-bold"
+                  className="text-lime-400 hover:underline font-sans font-bold"
                 >
                   一鍵帶入
                 </button>

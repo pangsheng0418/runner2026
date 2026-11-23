@@ -9,6 +9,7 @@ const authRoutes = require('./routes/auth');
 const adminEventRoutes = require('./routes/adminEvents');
 const adminRegistrationRoutes = require('./routes/adminRegistrations');
 const publicRoutes = require('./routes/public');
+const integrationRoutes = require('./routes/integration');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -24,7 +25,7 @@ app.use('/uploads', express.static(UPLOADS_DIR));
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
-    service: 'RunFlow 路跑活動線上報名與管理平台',
+    service: 'TUR (Taiwan Ultra Runners) 路跑活動線上報名與管理平台',
     timestamp: new Date().toISOString(),
   });
 });
@@ -34,6 +35,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/admin/events', adminEventRoutes);
 app.use('/api/admin', adminRegistrationRoutes);
 app.use('/api/public', publicRoutes);
+app.use('/api/integration', integrationRoutes);
 
 // 生產環境（非 Vercel）：提供前端 React build 靜態檔
 const distDir = path.join(__dirname, '..', 'dist');

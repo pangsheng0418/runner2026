@@ -8,6 +8,13 @@ const {
   buildExpectedHeaders,
 } = require('../services/googleSheets');
 const { extractRunnerSummary } = require('../services/validation');
+const {
+  maskIdNumber,
+  buildChipImportCsv,
+  autoAssignBibNumbers,
+  pushRosterToChipSystem,
+  toChipTimingRegistration,
+} = require('../services/chipBridge');
 
 const router = express.Router();
 router.use(requireAdminAuth);
@@ -15,6 +22,7 @@ router.use(requireAdminAuth);
 function formatRegistrationRow(row) {
   return {
     ...row,
+    id_masked: maskIdNumber(row.runner_id_number),
     answers: JSON.parse(row.answers_json || '{}'),
     priceBreakdown: JSON.parse(row.price_breakdown_json || '[]'),
   };
@@ -242,6 +250,8 @@ router.get('/events/:eventId/registrations/export-csv', (req, res) => {
     const answers = JSON.parse(reg.answers_json || '{}');
     const rowMap = {
       '報名序號': reg.reg_code,
+      '參賽編號': reg.bib_number || '',
+      '分組代碼': reg.category_code || '',
       '報名時間': reg.created_at,
       '應繳總金額': reg.total_amount,
       '繳費狀態': reg.payment_status,
@@ -262,6 +272,134 @@ router.get('/events/:eventId/registrations/export-csv', (req, res) => {
     `attachment; filename*=UTF-8''${encodeURIComponent(`${event.name}-報名名單.csv`)}`
   );
   return res.send(csvContent);
+});
+
+// PATCH /api/admin/registrations/:id/bib — 手動修改參賽編號（號碼布）與晶片分組代碼
+router.patch('/registrations/:id/bib', (req, res) => {
+  const id = Number(req.params.id);
+  const reg = db.prepare('SELECT * FROM registrations WHERE id = ?').get(id);
+  if (!reg) {
+    return res.status(404).json({ error: '找不到該筆報名紀錄。' });
+  }
+  const bib = String(req.body?.bib_number ?? reg.bib_number ?? '').trim().toUpperCase();
+  const cat = String(req.body?.category_code ?? reg.category_code ?? '').trim();
+
+  if (bib) {
+    const dup = db
+      .prepare('SELECT id, runner_name FROM registrations WHERE event_id = ? AND bib_number = ? AND id != ?')
+      .get(reg.event_id, bib, id);
+    if (dup) {
+      return res.status(409).json({
+        error: `參賽編號「${bib}」已分配給 ${dup.runner_name}，請使用其他編號。`,
+      });
+    }
+  }
+
+  db.prepare('UPDATE registrations SET bib_number = ?, category_code = ? WHERE id = ?').run(bib, cat, id);
+  const updated = db.prepare('SELECT * FROM registrations WHERE id = ?').get(id);
+  return res.json({
+    registration: formatRegistrationRow(updated),
+    message: bib ? `已更新參賽編號為 ${bib}` : '已清除參賽編號',
+  });
+});
+
+// POST /api/admin/events/:eventId/registrations/auto-assign-bibs — 依報名組別一鍵自動配號
+router.post('/events/:eventId/registrations/auto-assign-bibs', (req, res) => {
+  const eventId = Number(req.params.eventId);
+  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+  if (!event) {
+    return res.status(404).json({ error: '找不到指定的活動。' });
+  }
+  const fields = JSON.parse(event.fields_json || '[]');
+  const paidOnly = Boolean(req.body?.paidOnly);
+  const overwrite = Boolean(req.body?.overwrite);
+
+  const result = autoAssignBibNumbers(db, event, fields, { paidOnly, overwrite });
+  const rows = db
+    .prepare('SELECT * FROM registrations WHERE event_id = ? ORDER BY created_at DESC, id DESC')
+    .all(eventId);
+
+  return res.json({
+    ...result,
+    registrations: rows.map(formatRegistrationRow),
+    message:
+      result.assignedCount > 0
+        ? `自動配號完成！本次共為 ${result.assignedCount} 位跑者分配專屬參賽編號（Bib）。`
+        : '所有符合條件的跑者皆已有參賽編號，無需重複分配。',
+  });
+});
+
+// GET /api/admin/events/:eventId/registrations/export-chip-csv — 匯出 TUR 晶片系統專用名單 CSV
+router.get('/events/:eventId/registrations/export-chip-csv', (req, res) => {
+  const eventId = Number(req.params.eventId);
+  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+  if (!event) {
+    return res.status(404).json({ error: '找不到指定的活動。' });
+  }
+  const paidOnly = String(req.query.paidOnly || '').toLowerCase() === 'true';
+  const fields = JSON.parse(event.fields_json || '[]');
+  const sql = paidOnly
+    ? "SELECT * FROM registrations WHERE event_id = ? AND payment_status = '已繳費' ORDER BY id ASC"
+    : 'SELECT * FROM registrations WHERE event_id = ? ORDER BY id ASC';
+  const rows = db.prepare(sql).all(eventId);
+
+  const csvContent = buildChipImportCsv(event, fields, rows);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename*=UTF-8''${encodeURIComponent(`${event.timing_event_id || event.slug}-TUR晶片系統匯入名單.csv`)}`
+  );
+  return res.send(csvContent);
+});
+
+// GET /api/admin/events/:eventId/registrations/chip-preview — 預覽 TUR 晶片系統標準 JSON 格式
+router.get('/events/:eventId/registrations/chip-preview', (req, res) => {
+  const eventId = Number(req.params.eventId);
+  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+  if (!event) {
+    return res.status(404).json({ error: '找不到指定的活動。' });
+  }
+  const paidOnly = String(req.query.paidOnly || '').toLowerCase() === 'true';
+  const fields = JSON.parse(event.fields_json || '[]');
+  const sql = paidOnly
+    ? "SELECT * FROM registrations WHERE event_id = ? AND payment_status = '已繳費' ORDER BY id ASC"
+    : 'SELECT * FROM registrations WHERE event_id = ? ORDER BY id ASC';
+  const rows = db.prepare(sql).all(eventId);
+
+  return res.json({
+    eventId: event.timing_event_id || event.slug,
+    count: rows.length,
+    registrations: rows.map((r) => toChipTimingRegistration(event, fields, r)),
+  });
+});
+
+// POST /api/admin/events/:eventId/registrations/push-to-chip — 一鍵推送名單至獨立的 TUR 晶片計時系統
+router.post('/events/:eventId/registrations/push-to-chip', async (req, res) => {
+  const eventId = Number(req.params.eventId);
+  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+  if (!event) {
+    return res.status(404).json({ error: '找不到指定的活動。' });
+  }
+  const paidOnly = req.body?.paidOnly !== false;
+  const fields = JSON.parse(event.fields_json || '[]');
+  const sql = paidOnly
+    ? "SELECT * FROM registrations WHERE event_id = ? AND payment_status = '已繳費' ORDER BY id ASC"
+    : 'SELECT * FROM registrations WHERE event_id = ? ORDER BY id ASC';
+  const rows = db.prepare(sql).all(eventId);
+
+  try {
+    const result = await pushRosterToChipSystem(event, fields, rows, {
+      gasUrl: req.body?.timing_gas_url || event.timing_gas_url,
+      username: req.body?.chip_admin_username,
+      password: req.body?.chip_admin_password,
+    });
+    return res.json({
+      ...result,
+      message: `已成功將 ${result.pushedCount} 位跑者名單推送至 TUR 晶片計時系統（獨立資料庫同步完成）！`,
+    });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
 });
 
 module.exports = router;
