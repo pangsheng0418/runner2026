@@ -173,103 +173,91 @@ export default function LookupRegistrationPage() {
   return (
     <div className="min-h-screen flex flex-col">
       <TurHeader
-        title="報名狀態反向查詢與修改"
-        subtitle="查詢繳費對帳狀態、補填匯款帳號後五碼或修改報名資料"
-        statusLabel="雙重身分驗證保護"
+        title="報名查詢／修改"
         showHomeLink
         showAdminLink
       />
 
-      <main className="mx-auto w-full max-w-4xl flex-1 px-4 sm:px-6 pt-8 space-y-6">
+      <main className="mx-auto w-full max-w-4xl flex-1 px-4 sm:px-6 pt-6 space-y-5">
         <Link
           to="/"
           className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-lime-400"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
-          返回開放中賽事列表
+          返回活動列表
         </Link>
 
         {/* 雙因子反向查詢表單 */}
-        <section className="tur-control-bar rounded-2xl p-6 space-y-5">
-          <div className="space-y-1">
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-sky-400/40 bg-sky-500/15 px-3 py-1 text-xs font-bold text-sky-300">
-              <ShieldCheck className="h-3.5 w-3.5" />
-              選手個人報名反向查詢
+        <section className="tur-control-bar rounded-2xl p-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h1 className="text-lg font-black text-white">查詢或修改報名</h1>
+            <div className="grid grid-cols-2 gap-1 rounded-xl border border-slate-800 bg-slate-950 p-1">
+              <button
+                type="button"
+                onClick={() => setVerifyBy('regCode')}
+                className={`rounded-lg px-3 py-1 text-xs font-extrabold transition ${
+                  verifyBy === 'regCode'
+                    ? 'bg-sky-500 text-slate-950'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                報名序號
+              </button>
+              <button
+                type="button"
+                onClick={() => setVerifyBy('email')}
+                className={`rounded-lg px-3 py-1 text-xs font-extrabold transition ${
+                  verifyBy === 'email'
+                    ? 'bg-sky-500 text-slate-950'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Email
+              </button>
             </div>
-            <h1 className="text-xl sm:text-2xl font-black text-white">
-              查詢報名狀況 ／ 補填匯款後五碼 ／ 修改資料
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-400">
-              為保護您的個人資料，請輸入「身分證字號 / 護照號碼」並搭配「報名序號」或「報名電子信箱」驗證查詢。
-            </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-800 bg-slate-950 p-1 max-w-md">
-            <button
-              type="button"
-              onClick={() => setVerifyBy('regCode')}
-              className={`rounded-lg py-2 text-xs font-extrabold transition ${
-                verifyBy === 'regCode'
-                  ? 'bg-sky-500 text-slate-950'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              以「報名序號」查詢
-            </button>
-            <button
-              type="button"
-              onClick={() => setVerifyBy('email')}
-              className={`rounded-lg py-2 text-xs font-extrabold transition ${
-                verifyBy === 'email'
-                  ? 'bg-sky-500 text-slate-950'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              忘記序號？以「Email」查詢
-            </button>
-          </div>
-
-          <form onSubmit={handleLookup} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+          <form onSubmit={handleLookup} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
             <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                身分證字號 / 護照號碼 *
+              <label className="block text-xs font-bold text-slate-300 mb-1">
+                身份證字號 / 護照 *
               </label>
               <input
                 type="text"
                 required
                 value={idNumber}
                 onChange={(e) => setIdNumber(e.target.value)}
-                placeholder="例如：A123456789"
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 font-mono-num text-sm text-white uppercase focus:border-lime-400 focus:outline-none"
+                placeholder="A123456789"
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 font-mono-num text-sm text-white uppercase focus:border-lime-400 focus:outline-none"
               />
             </div>
 
             {verifyBy === 'regCode' ? (
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                  專屬報名序號 *
+                <label className="block text-xs font-bold text-slate-300 mb-1">
+                  報名序號 *
                 </label>
                 <input
                   type="text"
                   required
                   value={regCode}
                   onChange={(e) => setRegCode(e.target.value)}
-                  placeholder="例如：TUR26-0001"
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 font-mono-num text-sm text-white uppercase focus:border-lime-400 focus:outline-none"
+                  placeholder="TUR26-0001"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 font-mono-num text-sm text-white uppercase focus:border-lime-400 focus:outline-none"
                 />
               </div>
             ) : (
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                  報名填寫的電子信箱 *
+                <label className="block text-xs font-bold text-slate-300 mb-1">
+                  電子信箱 *
                 </label>
                 <input
                   type="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="runner@example.com"
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
+                  placeholder="name@example.com"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
                 />
               </div>
             )}
@@ -280,7 +268,7 @@ export default function LookupRegistrationPage() {
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 px-5 py-2.5 text-sm font-black text-slate-950 hover:from-emerald-400 hover:to-lime-300 disabled:opacity-60 transition"
             >
               {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-              <span>{searching ? '查詢驗證中...' : '立即查詢'}</span>
+              <span>{searching ? '查詢中...' : '查詢'}</span>
             </button>
           </form>
 

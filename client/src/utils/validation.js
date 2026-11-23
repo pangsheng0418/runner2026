@@ -4,7 +4,8 @@ const TW_ID_LETTERS = {
   S: 26, T: 27, U: 28, V: 29, W: 32, X: 30, Y: 31, Z: 33,
 };
 
-export const MIN_REGISTRATION_AGE = 16;
+export const MIN_REGISTRATION_AGE = 10;
+export const MAX_REGISTRATION_AGE = 80;
 
 export function validateTaiwanIdOrPassport(raw) {
   const value = String(raw || '').trim().toUpperCase();
@@ -59,16 +60,13 @@ export function calculateAge(birthDateStr, referenceDate = new Date()) {
   return age;
 }
 
-export function validateBirthDateAge(raw, minAge = MIN_REGISTRATION_AGE) {
+export function validateBirthDateAge(raw, minAge = MIN_REGISTRATION_AGE, maxAge = MAX_REGISTRATION_AGE) {
   const age = calculateAge(raw);
   if (age === null) {
     return '請選擇有效的出生年月日';
   }
-  if (age < 0 || age > 120) {
-    return '出生年月日不合理，請重新確認';
-  }
-  if (age < minAge) {
-    return `本活動限滿 ${minAge} 歲以上報名（依出生年月日計算目前實歲為 ${age} 歲，不符報名資格）`;
+  if (age < minAge || age > maxAge) {
+    return `年齡限 ${minAge}～${maxAge} 歲（目前實歲 ${age} 歲，請確認是否輸入有誤）`;
   }
   return '';
 }
@@ -111,6 +109,7 @@ export function validateRemittanceLast5(raw) {
 export function isBirthDateField(field) {
   return (
     field?.id === 'birth_date' ||
+    field?.validation === 'age_10_80' ||
     field?.validation === 'min_age_16' ||
     (field?.type === 'date' && String(field?.label || '').includes('出生'))
   );
@@ -139,7 +138,7 @@ export function validateSingleField(field, val, { checkRequired = false } = {}) 
     return validateTaiwanIdOrPassport(strVal);
   }
   if (isBirthDateField(field)) {
-    return validateBirthDateAge(strVal, MIN_REGISTRATION_AGE);
+    return validateBirthDateAge(strVal, MIN_REGISTRATION_AGE, MAX_REGISTRATION_AGE);
   }
   if (field.type === 'tel' || field.validation === 'phone') {
     return validatePhone(strVal);
@@ -168,22 +167,20 @@ export function getFieldValidBadge(field, val, error) {
   if (!strVal) return '';
 
   if (field.type === 'tw_id' || field.validation === 'tw_id_or_passport') {
-    return /^[A-Z]\d{9}$/.test(strVal.toUpperCase())
-      ? '台灣身份證字號檢核通過'
-      : '護照號碼格式驗證通過';
+    return /^[A-Z]\d{9}$/.test(strVal.toUpperCase()) ? '身分證通過' : '護照通過';
   }
   if (isBirthDateField(field)) {
     const age = calculateAge(strVal);
-    return age !== null ? `符合滿 ${MIN_REGISTRATION_AGE} 歲報名資格（實歲 ${age} 歲）` : '';
+    return age !== null ? `實歲 ${age} 歲（符合 10～80 歲）` : '';
   }
   if (field.type === 'tel' || field.validation === 'phone') {
-    return '手機 10 碼格式正確';
+    return '手機格式正確';
   }
   if (field.type === 'email' || field.validation === 'email') {
-    return '電子信箱格式正確';
+    return 'Email 格式正確';
   }
   if (field.id === 'remittance_last5' || field.validation === 'remittance_last5') {
-    return '匯款尾五碼格式正確';
+    return '尾五碼正確';
   }
   return '';
 }

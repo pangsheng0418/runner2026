@@ -88,16 +88,11 @@ export default function AdminLoginPage() {
         <div className="tur-control-bar overflow-hidden rounded-2xl shadow-2xl">
           <div className="tur-accent-strip w-full" />
           <div className="p-7 sm:p-8">
-            <div className="flex flex-col items-start gap-3 mb-5">
-              <TurLogo size="md" />
-              <div>
-                <h1 className="text-2xl font-black tracking-wide text-white">
-                  {mode === 'login' ? '承辦人專屬入口' : '註冊承辦人帳號'}
-                </h1>
-                <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-                  每位承辦人獨立作業，建立報名表後即自動開啟專屬後台管理，僅自己可存取與編輯，絕不互相影響。
-                </p>
-              </div>
+            <div className="flex items-center gap-3 mb-5">
+              <TurLogo size="sm" />
+              <h1 className="text-xl font-black text-white">
+                {mode === 'login' ? '承辦人登入' : '註冊承辦人'}
+              </h1>
             </div>
 
             {/* 登入 / 註冊切換分頁 */}
@@ -233,31 +228,12 @@ export default function AdminLoginPage() {
                   {loading
                     ? '處理中...'
                     : mode === 'register'
-                    ? '建立承辦人帳號並建立報名表'
-                    : '登入承辦人工作台'}
+                    ? '建立帳號'
+                    : '登入'}
                 </span>
                 <ArrowRight className="h-4 w-4" />
               </button>
             </form>
-
-            {/* 架構安全與統一資料庫提示 */}
-            <div className="mt-6 space-y-2 rounded-xl border border-slate-800 bg-slate-950/75 p-3.5 text-[11px] text-slate-400">
-              <div className="flex items-center gap-2 text-emerald-300 font-bold">
-                <ShieldCheck className="h-4 w-4 shrink-0" />
-                <span>承辦人分層權限與資料隔離</span>
-              </div>
-              <p className="leading-relaxed">
-                一般承辦人登入後僅可檢視與修改自己建立的活動報名表，互不干擾；最高權限承辦人（系統總管）可檢視與管理全平台活動及所有承辦人權限資料。
-              </p>
-              <div className="flex items-center gap-2 pt-1 text-sky-300 font-semibold">
-                <Database className="h-3.5 w-3.5 shrink-0" />
-                <span>
-                  {cloudConfigured
-                    ? '已連線平台統一 Google 試算表資料庫（免重複設定連結）'
-                    : '統一資料庫模式：進入系統自動指向同一份資料庫'}
-                </span>
-              </div>
-            </div>
           </div>
         </div>
       </div>

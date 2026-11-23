@@ -522,16 +522,12 @@ export default function AdminDashboardPage() {
         </div>
       </div>
 
-      <div className="rounded-xl bg-emerald-950/30 border border-emerald-500/30 px-3.5 py-2.5 text-xs text-emerald-200 leading-relaxed">
-        <strong>自動整合統一資料庫：</strong>無需手動建立或貼上 Google 試算表連結！系統自動指向同一資料庫並為此活動建立專屬分頁。
-      </div>
-
       <div className="flex justify-end gap-2 pt-2">
         {!isInline && (
           <button
             type="button"
             onClick={() => setShowCreate(false)}
-            className="rounded-xl border border-slate-700 px-4 py-2.5 text-xs font-bold text-slate-300 hover:bg-slate-800"
+            className="rounded-xl border border-slate-700 px-4 py-2 text-xs font-bold text-slate-300 hover:bg-slate-800"
           >
             取消
           </button>
@@ -539,10 +535,10 @@ export default function AdminDashboardPage() {
         <button
           type="submit"
           disabled={creating}
-          className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 px-5 py-2.5 text-xs sm:text-sm font-black text-slate-950 hover:from-emerald-400 hover:to-lime-300 disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 px-5 py-2 text-xs sm:text-sm font-black text-slate-950 hover:from-emerald-400 hover:to-lime-300 disabled:opacity-60"
         >
           <Sparkles className="h-4 w-4" />
-          <span>{creating ? '建立中...' : '建立報名表並進入後台設定'}</span>
+          <span>{creating ? '建立中...' : '建立活動'}</span>
         </button>
       </div>
     </form>
@@ -551,22 +547,15 @@ export default function AdminDashboardPage() {
   return (
     <div className="min-h-screen flex flex-col">
       <TurHeader
-        title={isSuperAdmin ? '最高權限後台管理系統' : hasEvents ? '承辦人專屬後台管理系統' : '建立活動報名表'}
-        subtitle={
-          currentAdmin
-            ? `登入帳號：${currentAdmin.displayName}（@${currentAdmin.username}）• ${
-                isSuperAdmin ? '最高權限總管（可管理全平台活動與承辦人權限）' : '一般承辦人（獨立管理自己建立之活動）'
-              }`
-            : '承辦人後台管理系統'
-        }
-        statusLabel={isSuperAdmin ? '最高權限模式' : hasEvents ? '承辦人獨立模式' : '等待建立第一張報名表'}
+        title={isSuperAdmin ? '後台管理（最高權限）' : '承辦人後台'}
+        subtitle={currentAdmin ? `${currentAdmin.displayName} (@${currentAdmin.username})` : ''}
         showHomeLink
-        homeLabel="前台報名平台"
+        homeLabel="前台"
         rightSlot={
           <button
             type="button"
             onClick={handleLogout}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-bold text-slate-300 hover:border-rose-500 hover:text-rose-400 transition"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-300 hover:border-rose-500 hover:text-rose-400 transition"
           >
             <LogOut className="h-3.5 w-3.5" />
             <span>登出</span>
@@ -580,26 +569,26 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 sm:px-6 pt-8 space-y-6">
-        {/* 最高權限承辦人專屬導覽分頁：所有活動管理 / 承辦人與權限管理 */}
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 sm:px-6 pt-5 space-y-5">
+        {/* 最高權限導覽分頁 */}
         {!loading && isSuperAdmin && (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-500/35 bg-amber-950/20 px-4 py-3">
-            <div className="flex items-center gap-2 text-xs sm:text-sm font-extrabold text-amber-300">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-amber-500/35 bg-amber-950/20 px-4 py-2.5">
+            <div className="flex items-center gap-1.5 text-xs font-extrabold text-amber-300">
               <Crown className="h-4 w-4 shrink-0" />
-              <span>最高權限承辦人模式：您可檢視並修改全平台所有活動與所有承辦人權限資料</span>
+              <span>最高權限</span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => setActiveSection('events')}
-                className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-black transition ${
+                className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-black transition ${
                   activeSection === 'events'
                     ? 'bg-amber-400 text-slate-950'
                     : 'border border-slate-700 bg-slate-900 text-slate-300 hover:text-white'
                 }`}
               >
                 <Calendar className="h-3.5 w-3.5" />
-                <span>全平台活動管理 ({events.length})</span>
+                <span>活動管理 ({events.length})</span>
               </button>
               <button
                 type="button"
@@ -607,14 +596,14 @@ export default function AdminDashboardPage() {
                   setActiveSection('users');
                   loadUsers();
                 }}
-                className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-black transition ${
+                className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-black transition ${
                   activeSection === 'users'
                     ? 'bg-amber-400 text-slate-950'
                     : 'border border-slate-700 bg-slate-900 text-slate-300 hover:text-white'
                 }`}
               >
                 <ShieldCheck className="h-3.5 w-3.5" />
-                <span>承辦人與權限管理 ({users.length})</span>
+                <span>承辦人 ({users.length})</span>
               </button>
               <button
                 type="button"
@@ -622,14 +611,14 @@ export default function AdminDashboardPage() {
                   setActiveSection('data');
                   loadUsers();
                 }}
-                className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-black transition ${
+                className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-black transition ${
                   activeSection === 'data'
                     ? 'bg-amber-400 text-slate-950'
                     : 'border border-slate-700 bg-slate-900 text-slate-300 hover:text-white'
                 }`}
               >
                 <HardDrive className="h-3.5 w-3.5" />
-                <span>資料管理與備份</span>
+                <span>資料備份</span>
               </button>
             </div>
           </div>
@@ -642,95 +631,77 @@ export default function AdminDashboardPage() {
             ))}
           </div>
         ) : activeSection === 'data' && isSuperAdmin ? (
-          /* ==================== 最高權限專屬：資料管理與備份中心 ==================== */
-          <section className="space-y-6">
-            <div>
-              <h1 className="text-2xl font-black tracking-wide text-white">資料載入、清空與完整備份中心</h1>
-              <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-                所有操作皆即時同步至平台統一資料庫，執行清空或還原前建議先下載一份完整備份檔保存。
-              </p>
-            </div>
+          /* ==================== 資料管理與備份 ==================== */
+          <section className="space-y-5">
+            <h1 className="text-xl font-black text-white">資料管理與備份</h1>
 
-            {/* 目前資料庫統計總覽 */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="tur-control-bar rounded-2xl p-5">
-                <p className="text-xs font-bold text-slate-400">承辦人帳號總數</p>
-                <p className="mt-1 font-mono-num text-3xl font-black text-sky-300">{users.length}</p>
+            {/* 統計 */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="tur-control-bar rounded-2xl p-4">
+                <p className="text-xs text-slate-400">承辦人</p>
+                <p className="mt-1 font-mono-num text-2xl font-black text-sky-300">{users.length}</p>
               </div>
-              <div className="tur-control-bar rounded-2xl p-5">
-                <p className="text-xs font-bold text-slate-400">活動報名表總場數</p>
-                <p className="mt-1 font-mono-num text-3xl font-black text-lime-400">{events.length}</p>
-                <p className="mt-1 text-xs text-slate-400">
-                  開放中 {openCount} · 籌備中 {preparingCount} · 已結案 {closedCount}
-                </p>
+              <div className="tur-control-bar rounded-2xl p-4">
+                <p className="text-xs text-slate-400">活動</p>
+                <p className="mt-1 font-mono-num text-2xl font-black text-lime-400">{events.length}</p>
               </div>
-              <div className="tur-control-bar rounded-2xl p-5">
-                <p className="text-xs font-bold text-slate-400">累計報名紀錄筆數</p>
-                <p className="mt-1 font-mono-num text-3xl font-black text-amber-300">{totalRunners}</p>
+              <div className="tur-control-bar rounded-2xl p-4">
+                <p className="text-xs text-slate-400">報名筆數</p>
+                <p className="mt-1 font-mono-num text-2xl font-black text-amber-300">{totalRunners}</p>
               </div>
             </div>
 
-            {/* 三大資料管理功能卡 */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            {/* 三大工具卡 */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               {/* 1. 載入測試資料 */}
-              <div className="tur-card rounded-2xl border border-emerald-500/40 bg-slate-900/90 p-6 flex flex-col justify-between space-y-5">
-                <div className="space-y-3">
-                  <div className="inline-flex items-center gap-2 text-emerald-300 font-black text-base">
-                    <Sparkles className="h-5 w-5" />
-                    <span>1. 一鍵載入測試資料</span>
+              <div className="tur-card rounded-2xl border border-emerald-500/40 bg-slate-900/90 p-5 flex flex-col justify-between space-y-4">
+                <div className="space-y-2">
+                  <div className="inline-flex items-center gap-2 text-emerald-300 font-black text-sm">
+                    <Sparkles className="h-4 w-4" />
+                    <span>載入測試資料</span>
                   </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    自動建立多承辦人與三態活動測試資料，方便立即展示與演練權限隔離與報名流程：
+                  <p className="text-xs text-slate-400">
+                    建立示範承辦人（org_north / org_south）、三態活動與測試名單。
                   </p>
-                  <ul className="space-y-1.5 text-xs text-slate-400 bg-slate-950/80 border border-slate-800 rounded-xl p-3.5">
-                    <li>• 新增承辦人：<code className="text-sky-300">org_north</code> / <code className="text-sky-300">org_south</code>（密碼皆為 <code className="text-lime-300">runner2026</code>）</li>
-                    <li>• 開放中賽事 2 場（台北極速超馬、高雄星光半馬）</li>
-                    <li>• 籌備中賽事 1 場（2027 台灣 24H 超馬）</li>
-                    <li>• 已結案賽事 1 場（2026 春季越野賽）</li>
-                    <li>• 範例報名跑者 9 筆（含已繳費、待繳費與配號）</li>
-                  </ul>
                 </div>
 
                 <button
                   type="button"
                   onClick={handleSeedDemo}
                   disabled={Boolean(dataBusy)}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 px-4 py-3 text-sm font-black text-slate-950 hover:from-emerald-400 hover:to-lime-300 disabled:opacity-50 transition"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 px-4 py-2.5 text-sm font-black text-slate-950 hover:from-emerald-400 hover:to-lime-300 disabled:opacity-50 transition"
                 >
                   <Sparkles className="h-4 w-4" />
-                  <span>{dataBusy === 'seed' ? '載入測試資料中...' : '立即載入測試資料'}</span>
+                  <span>{dataBusy === 'seed' ? '載入中...' : '載入測試資料'}</span>
                 </button>
               </div>
 
-              {/* 2. 資料完整備份與還原 */}
-              <div className="tur-card rounded-2xl border border-sky-500/40 bg-slate-900/90 p-6 flex flex-col justify-between space-y-5">
-                <div className="space-y-3">
-                  <div className="inline-flex items-center gap-2 text-sky-300 font-black text-base">
-                    <Download className="h-5 w-5" />
-                    <span>2. 資料完整備份與還原</span>
+              {/* 2. 備份與還原 */}
+              <div className="tur-card rounded-2xl border border-sky-500/40 bg-slate-900/90 p-5 flex flex-col justify-between space-y-4">
+                <div className="space-y-2">
+                  <div className="inline-flex items-center gap-2 text-sky-300 font-black text-sm">
+                    <Download className="h-4 w-4" />
+                    <span>備份與還原</span>
                   </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    匯出完整 JSON 備份檔，內含所有<strong>承辦人帳號與權限</strong>、<strong>活動設定與動態表單</strong>、以及<strong>全部跑者報名紀錄與配號</strong>；隨時可上傳備份檔一鍵還原。
+                  <p className="text-xs text-slate-400">
+                    下載或還原全平台 JSON 備份（含帳號、活動與名單）。
                   </p>
-                  <div className="rounded-xl border border-sky-500/25 bg-sky-950/20 p-3.5 text-xs text-sky-200 leading-relaxed">
-                    還原後會自動同步回平台統一 Google 試算表資料庫，確保雲端與本機資料 100% 一致。
-                  </div>
                 </div>
 
-                <div className="space-y-2.5">
+                <div className="space-y-2">
                   <button
                     type="button"
                     onClick={handleDownloadBackup}
                     disabled={Boolean(dataBusy)}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-cyan-400 px-4 py-3 text-sm font-black text-slate-950 hover:from-sky-400 hover:to-cyan-300 disabled:opacity-50 transition"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-cyan-400 px-4 py-2.5 text-sm font-black text-slate-950 hover:from-sky-400 hover:to-cyan-300 disabled:opacity-50 transition"
                   >
                     <Download className="h-4 w-4" />
-                    <span>{dataBusy === 'backup' ? '產生備份檔中...' : '下載資料完整備份 (.json)'}</span>
+                    <span>{dataBusy === 'backup' ? '備份中...' : '下載完整備份 (.json)'}</span>
                   </button>
 
-                  <label className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-sky-500/40 bg-sky-500/15 px-4 py-2.5 text-xs font-extrabold text-sky-300 hover:bg-sky-500/25 transition">
+                  <label className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-sky-500/40 bg-sky-500/15 px-4 py-2 text-xs font-extrabold text-sky-300 hover:bg-sky-500/25 transition">
                     <Upload className="h-4 w-4" />
-                    <span>{dataBusy === 'restore' ? '還原資料中...' : '上傳完整備份檔一鍵還原'}</span>
+                    <span>{dataBusy === 'restore' ? '還原中...' : '上傳備份檔還原'}</span>
                     <input
                       type="file"
                       accept="application/json,.json"
@@ -743,78 +714,60 @@ export default function AdminDashboardPage() {
               </div>
 
               {/* 3. 資料清空 */}
-              <div className="tur-card rounded-2xl border border-rose-500/40 bg-slate-900/90 p-6 flex flex-col justify-between space-y-5">
-                <div className="space-y-3">
-                  <div className="inline-flex items-center gap-2 text-rose-400 font-black text-base">
-                    <AlertTriangle className="h-5 w-5" />
-                    <span>3. 資料清空（正式上線前重置）</span>
+              <div className="tur-card rounded-2xl border border-rose-500/40 bg-slate-900/90 p-5 flex flex-col justify-between space-y-4">
+                <div className="space-y-2.5">
+                  <div className="inline-flex items-center gap-2 text-rose-400 font-black text-sm">
+                    <AlertTriangle className="h-4 w-4" />
+                    <span>清空資料（需輸入 CLEAR）</span>
                   </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    測試完成準備正式營運時，可選擇僅清空測試報名名單，或清空全平台活動與報名資料。為防誤觸，執行前需輸入 <code className="text-rose-300 font-bold">CLEAR</code> 確認。
-                  </p>
 
-                  <label className="flex items-start gap-2 rounded-xl border border-slate-800 bg-slate-950/80 p-3 text-xs text-slate-300 cursor-pointer">
+                  <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={clearAlsoOrganizers}
                       onChange={(e) => setClearAlsoOrganizers(e.target.checked)}
-                      className="mt-0.5 h-4 w-4 accent-rose-500"
+                      className="h-4 w-4 accent-rose-500"
                     />
-                    <span>
-                      執行「清空全部活動與報名」時，<strong>一併刪除其他一般承辦人帳號</strong>（永遠保留您目前登入的最高權限帳號）
-                    </span>
+                    <span>一併刪除其他一般承辦人</span>
                   </label>
                 </div>
 
-                <div className="space-y-2.5">
+                <div className="space-y-2">
                   <button
                     type="button"
                     onClick={() => handleClearData('registrations_only')}
                     disabled={Boolean(dataBusy)}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/15 px-4 py-2.5 text-xs font-extrabold text-amber-300 hover:bg-amber-500/25 disabled:opacity-50 transition"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/15 px-4 py-2 text-xs font-extrabold text-amber-300 hover:bg-amber-500/25 disabled:opacity-50 transition"
                   >
                     <RotateCcw className="h-4 w-4" />
-                    <span>
-                      {dataBusy === 'clear_registrations_only'
-                        ? '清空中...'
-                        : '僅清空所有報名名單（保留活動設定）'}
-                    </span>
+                    <span>{dataBusy === 'clear_registrations_only' ? '清空中...' : '僅清空報名名單'}</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => handleClearData('all_data')}
                     disabled={Boolean(dataBusy)}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-3 text-xs sm:text-sm font-black text-white hover:bg-rose-500 disabled:opacity-50 transition"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-xs sm:text-sm font-black text-white hover:bg-rose-500 disabled:opacity-50 transition"
                   >
                     <Trash2 className="h-4 w-4" />
-                    <span>
-                      {dataBusy === 'clear_all_data'
-                        ? '清空中...'
-                        : '清空全平台活動與報名資料'}
-                    </span>
+                    <span>{dataBusy === 'clear_all_data' ? '清空中...' : '清空全部活動與名單'}</span>
                   </button>
                 </div>
               </div>
             </div>
           </section>
         ) : activeSection === 'users' && isSuperAdmin ? (
-          /* ==================== 最高權限專屬：承辦人帳號與權限管理 ==================== */
-          <section className="space-y-5">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h1 className="text-2xl font-black tracking-wide text-white">承辦人帳號與權限管理</h1>
-                <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-                  可新增承辦人、調整顯示名稱、變更權限等級（一般承辦人 / 最高權限承辦人）、重設密碼或刪除帳號。
-                </p>
-              </div>
+          /* ==================== 承辦人管理 ==================== */
+          <section className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h1 className="text-xl font-black text-white">承辦人與權限管理</h1>
               <button
                 type="button"
                 onClick={() => setShowCreateUser(true)}
-                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 px-5 py-2.5 text-xs sm:text-sm font-black text-slate-950 hover:from-amber-400 hover:to-yellow-300"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 px-4 py-2 text-xs sm:text-sm font-black text-slate-950 hover:from-amber-400 hover:to-yellow-300"
               >
                 <UserPlus className="h-4 w-4" />
-                <span>新增承辦人帳號</span>
+                <span>新增承辦人</span>
               </button>
             </div>
 
@@ -928,89 +881,57 @@ export default function AdminDashboardPage() {
           <>
             {/* KPI 總覽卡 */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="tur-control-bar rounded-2xl p-5">
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  {isSuperAdmin ? '全平台活動場數' : '我的活動場數'}
-                </p>
-                <p className="mt-2 font-mono-num text-3xl font-black text-white">{events.length}</p>
-                <p className="mt-1 text-xs text-slate-300">
-                  <span className="text-emerald-400 font-bold">開放中 {openCount}</span>
-                  {' · '}
-                  <span className="text-sky-400 font-bold">籌備中 {preparingCount}</span>
-                  {' · '}
-                  <span className="text-slate-400 font-bold">已結案 {closedCount}</span>
+              <div className="tur-control-bar rounded-2xl p-4">
+                <p className="text-xs text-slate-400">活動場數</p>
+                <p className="mt-1 font-mono-num text-2xl font-black text-white">{events.length}</p>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  開放 {openCount} · 籌備 {preparingCount} · 結案 {closedCount}
                 </p>
               </div>
 
-              <div className="tur-control-bar rounded-2xl p-5">
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  {isSuperAdmin ? '全平台累計跑者' : '我的累計報名跑者'}
-                </p>
-                <p className="mt-2 font-mono-num text-3xl font-black text-lime-400">{totalRunners}</p>
-                <p className="mt-1 text-xs text-slate-400 flex items-center gap-1">
-                  <Users className="h-3.5 w-3.5 text-sky-400" />
-                  {isSuperAdmin ? '跨所有承辦人統計' : '僅統計您建立之活動'}
-                </p>
+              <div className="tur-control-bar rounded-2xl p-4">
+                <p className="text-xs text-slate-400">累計報名</p>
+                <p className="mt-1 font-mono-num text-2xl font-black text-lime-400">{totalRunners}</p>
               </div>
 
-              <div className="tur-control-bar rounded-2xl p-5">
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  {isSuperAdmin ? '全平台應收報名費' : '我的累計應收報名費'}
-                </p>
-                <p className="mt-2 font-mono-num text-3xl font-black text-amber-300">
+              <div className="tur-control-bar rounded-2xl p-4">
+                <p className="text-xs text-slate-400">應收總額</p>
+                <p className="mt-1 font-mono-num text-2xl font-black text-amber-300">
                   NT$ {totalRevenue.toLocaleString()}
                 </p>
-                <p className="mt-1 text-xs text-slate-400 flex items-center gap-1">
-                  <DollarSign className="h-3.5 w-3.5 text-amber-400" /> 含組別與加購金額
-                </p>
               </div>
 
-              <div className="tur-control-bar rounded-2xl p-5">
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">平台統一雲端資料庫</p>
-                <p className="mt-2 text-base font-black text-white flex items-center gap-2">
+              <div className="tur-control-bar rounded-2xl p-4">
+                <p className="text-xs text-slate-400">雲端試算表</p>
+                <p className="mt-1.5 text-sm font-black text-white flex items-center gap-1.5">
                   <Database
-                    className={`h-5 w-5 ${
+                    className={`h-4 w-4 ${
                       googleCreds.unifiedDbConfigured ? 'text-emerald-400' : 'text-amber-400'
                     }`}
                   />
-                  <span>
-                    {googleCreds.unifiedDbConfigured ? '已自動連線統一試算表' : '尚未設定統一雲端環境變數'}
-                  </span>
+                  <span>{googleCreds.unifiedDbConfigured ? '已連線' : '未設定'}</span>
                 </p>
-                {totalSyncErrors > 0 ? (
-                  <p className="mt-1 text-xs text-rose-400 flex items-center gap-1">
-                    <AlertTriangle className="h-3.5 w-3.5" /> 有 {totalSyncErrors} 筆待補送同步
-                  </p>
-                ) : (
-                  <p className="mt-1 text-xs text-slate-400">
-                    {googleCreds.unifiedDbConfigured
-                      ? `模式：${googleCreds.unifiedDbMode === 'api' ? 'Google Sheets API' : 'GAS 統一資料庫'}（免逐一貼網址）`
-                      : '請於部署設定 GOOGLE_MASTER_SHEET_ID 或 GOOGLE_MASTER_GAS_URL'}
-                  </p>
+                {totalSyncErrors > 0 && (
+                  <p className="mt-1 text-xs text-rose-400">待補送 {totalSyncErrors} 筆</p>
                 )}
               </div>
             </div>
 
             {/* 標題與建立按鈕 */}
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h1 className="text-2xl font-black tracking-wide text-white">
-                  {isSuperAdmin ? '全平台活動報名表總管' : '我的活動報名表管理'}
-                </h1>
-                <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-                  可隨時切換「開放中 / 籌備中 / 已結案」；前台首頁僅列出「開放中」的活動供跑者報名。
-                </p>
-              </div>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h1 className="text-xl font-black text-white">
+                {isSuperAdmin ? '全平台活動' : '我的活動'}
+              </h1>
               <button
                 type="button"
                 onClick={() => {
                   setNewForm(INITIAL_FORM());
                   setShowCreate(true);
                 }}
-                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 px-5 py-3 text-sm font-black text-slate-950 hover:from-emerald-400 hover:to-lime-300 shadow-lg shadow-emerald-950/50 transition"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 px-4 py-2 text-xs sm:text-sm font-black text-slate-950 hover:from-emerald-400 hover:to-lime-300 transition"
               >
                 <Plus className="h-4 w-4 stroke-[3]" />
-                <span>建立新活動報名表</span>
+                <span>新建活動</span>
               </button>
             </div>
 

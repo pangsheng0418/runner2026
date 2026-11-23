@@ -767,73 +767,67 @@ export default function PublicRegisterPage() {
     <div className="min-h-screen flex flex-col pb-24 lg:pb-0">
       <TurHeader
         title={event.name}
-        subtitle={event.english_name || '線上活動報名'}
-        statusLabel={status === 'open' ? '開放中' : status === 'preparing' ? '籌備中' : '已結案'}
         showHomeLink
         showLookupLink
       />
 
       <BannerHero event={event} />
 
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 sm:px-6 mt-6 space-y-6">
-        {/* 雙功能頁籤：線上報名 / 反向查詢修改 */}
-        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-800 bg-slate-900/90 p-2">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 sm:px-6 mt-5 space-y-5">
+        {/* 雙功能頁籤 */}
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-800 bg-slate-900/90 p-1.5">
           <button
             type="button"
             onClick={() => setPageMode('register')}
-            className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-xs sm:text-sm font-black transition ${
+            className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-xs sm:text-sm font-black transition ${
               pageMode === 'register'
                 ? 'bg-gradient-to-r from-emerald-500 to-lime-400 text-slate-950'
                 : 'text-slate-300 hover:bg-slate-800 hover:text-white'
             }`}
           >
-            <Send className="h-4 w-4" />
-            <span>線上填寫報名表（個人 / 團報）</span>
+            <Send className="h-3.5 w-3.5" />
+            <span>線上報名</span>
           </button>
           <button
             type="button"
             onClick={() => setPageMode('lookup')}
-            className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-xs sm:text-sm font-black transition ${
+            className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-xs sm:text-sm font-black transition ${
               pageMode === 'lookup'
                 ? 'bg-gradient-to-r from-sky-500 to-cyan-400 text-slate-950'
                 : 'text-slate-300 hover:bg-slate-800 hover:text-white'
             }`}
           >
-            <Search className="h-4 w-4" />
-            <span>反向查詢 ／ 修改報名・補填匯款後五碼</span>
+            <Search className="h-3.5 w-3.5" />
+            <span>查詢／修改</span>
           </button>
         </div>
 
         {pageMode === 'lookup' ? (
           /* ==================== 活動內反向查詢與改報分頁 ==================== */
-          <section className="max-w-4xl space-y-6">
-            <div className="tur-control-bar rounded-2xl p-6 space-y-4">
-              <div>
-                <h2 className="text-xl font-black text-white">查詢或修改本活動報名資料</h2>
-                <p className="text-xs sm:text-sm text-slate-400 mt-1">
-                  請輸入「身分證字號 / 護照號碼」並搭配「報名序號」或「電子信箱」，即可查看繳費對帳狀態、補填匯款帳號後五碼或修改報名內容。
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-800 bg-slate-950 p-1 max-w-sm">
-                <button
-                  type="button"
-                  onClick={() => setLookupBy('regCode')}
-                  className={`rounded-lg py-1.5 text-xs font-extrabold transition ${
-                    lookupBy === 'regCode' ? 'bg-sky-500 text-slate-950' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  以報名序號查詢
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLookupBy('email')}
-                  className={`rounded-lg py-1.5 text-xs font-extrabold transition ${
-                    lookupBy === 'email' ? 'bg-sky-500 text-slate-950' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  以 Email 查詢
-                </button>
+          <section className="max-w-4xl space-y-5">
+            <div className="tur-control-bar rounded-2xl p-5 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-lg font-black text-white">查詢／修改報名</h2>
+                <div className="grid grid-cols-2 gap-1 rounded-xl border border-slate-800 bg-slate-950 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setLookupBy('regCode')}
+                    className={`rounded-lg px-3 py-1 text-xs font-extrabold transition ${
+                      lookupBy === 'regCode' ? 'bg-sky-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    報名序號
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLookupBy('email')}
+                    className={`rounded-lg px-3 py-1 text-xs font-extrabold transition ${
+                      lookupBy === 'email' ? 'bg-sky-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Email
+                  </button>
+                </div>
               </div>
 
               <form onSubmit={handleLookup} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
@@ -1082,16 +1076,20 @@ export default function PublicRegisterPage() {
             )}
           </section>
         ) : (
-          /* ==================== 線上報名表單分頁（個人報名 / 團體報名） ==================== */
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            <div className="lg:col-span-8 space-y-6">
+          /* ==================== 線上報名表單分頁（個人 / 團報） ==================== */
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            <div className="lg:col-span-8 space-y-4">
               {event.description && (
-                <div className="tur-control-bar rounded-2xl p-5 sm:p-6">
-                  <h2 className="text-base sm:text-lg font-black text-lime-300 mb-2">賽事簡介與說明</h2>
-                  <p className="whitespace-pre-line text-sm sm:text-base text-slate-300 leading-relaxed">
+                <details className="tur-control-bar rounded-2xl px-5 py-3.5 group">
+                  <summary className="cursor-pointer text-sm font-bold text-lime-300 select-none list-none flex items-center justify-between">
+                    <span>賽事簡介</span>
+                    <span className="text-xs text-slate-400 group-open:hidden">展開</span>
+                    <span className="text-xs text-slate-400 hidden group-open:inline">收合</span>
+                  </summary>
+                  <p className="mt-2.5 whitespace-pre-line text-xs sm:text-sm text-slate-300 leading-relaxed">
                     {event.description}
                   </p>
-                </div>
+                </details>
               )}
 
               {!canRegister ? (
@@ -1133,27 +1131,23 @@ export default function PublicRegisterPage() {
                   noValidate
                   className="tur-card rounded-2xl border border-slate-800 bg-slate-900/90 p-5 sm:p-8 shadow-xl space-y-6"
                 >
-                  {/* 步驟 1：選擇個人報名或團體報名 */}
-                  <div className="space-y-3 border-b border-slate-800 pb-5">
-                    <h2 className="text-xl sm:text-2xl font-black text-white">1. 選擇報名方式與匯款方式</h2>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* 步驟 1：報名與匯款方式 */}
+                  <div className="space-y-3 border-b border-slate-800 pb-4">
+                    <div className="grid grid-cols-2 gap-2.5">
                       <button
                         type="button"
                         onClick={() => {
                           setRegType('individual');
                           setSubmitError('');
                         }}
-                        className={`flex items-start gap-3 rounded-xl border p-4 text-left transition ${
+                        className={`flex items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-black transition ${
                           regType === 'individual'
-                            ? 'border-lime-400 bg-lime-500/15 ring-2 ring-lime-400/25'
-                            : 'border-slate-700 bg-slate-950/75 hover:border-slate-500'
+                            ? 'border-lime-400 bg-lime-500/15 text-white ring-2 ring-lime-400/25'
+                            : 'border-slate-700 bg-slate-950/75 text-slate-300 hover:border-slate-500'
                         }`}
                       >
-                        <User className={`h-5 w-5 mt-0.5 shrink-0 ${regType === 'individual' ? 'text-lime-400' : 'text-slate-400'}`} />
-                        <div>
-                          <p className="text-sm font-black text-white">個人報名</p>
-                          <p className="text-xs text-slate-400 mt-0.5">單人填寫報名表，可選個別匯款或團體匯款記註後五碼</p>
-                        </div>
+                        <User className={`h-4 w-4 ${regType === 'individual' ? 'text-lime-400' : 'text-slate-400'}`} />
+                        <span>個人報名</span>
                       </button>
 
                       <button
@@ -1162,26 +1156,22 @@ export default function PublicRegisterPage() {
                           setRegType('group');
                           setSubmitError('');
                         }}
-                        className={`flex items-start gap-3 rounded-xl border p-4 text-left transition ${
+                        className={`flex items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-black transition ${
                           regType === 'group'
-                            ? 'border-sky-400 bg-sky-500/15 ring-2 ring-sky-400/25'
-                            : 'border-slate-700 bg-slate-950/75 hover:border-slate-500'
+                            ? 'border-sky-400 bg-sky-500/15 text-white ring-2 ring-sky-400/25'
+                            : 'border-slate-700 bg-slate-950/75 text-slate-300 hover:border-slate-500'
                         }`}
                       >
-                        <Users className={`h-5 w-5 mt-0.5 shrink-0 ${regType === 'group' ? 'text-sky-400' : 'text-slate-400'}`} />
-                        <div>
-                          <p className="text-sm font-black text-white">團體報名（可命名）</p>
-                          <p className="text-xs text-slate-400 mt-0.5">一次為多位跑友報名，自訂團名，支援團體統一匯款或個別匯款</p>
-                        </div>
+                        <Users className={`h-4 w-4 ${regType === 'group' ? 'text-sky-400' : 'text-slate-400'}`} />
+                        <span>團體報名</span>
                       </button>
                     </div>
 
-                    {/* 個人報名的匯款方式設定 */}
+                    {/* 個人匯款方式 */}
                     {regType === 'individual' && (
-                      <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4 space-y-3">
-                        <label className="block text-xs font-bold text-slate-300">匯款方式（無金流轉帳核帳用）</label>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                          <label className={`flex items-center gap-2 rounded-lg border px-3.5 py-2.5 text-xs font-bold cursor-pointer ${individualPaymentMode === 'individual' ? 'border-emerald-400 bg-emerald-500/15 text-emerald-300' : 'border-slate-700 text-slate-300'}`}>
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-3.5 space-y-2.5">
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold cursor-pointer ${individualPaymentMode === 'individual' ? 'border-emerald-400 bg-emerald-500/15 text-emerald-300' : 'border-slate-700 text-slate-300'}`}>
                             <input
                               type="radio"
                               name="indPayMode"
@@ -1189,9 +1179,9 @@ export default function PublicRegisterPage() {
                               onChange={() => setIndividualPaymentMode('individual')}
                               className="accent-emerald-400"
                             />
-                            <span>個別匯款（自行轉帳記註個人尾五碼）</span>
+                            <span>個別匯款</span>
                           </label>
-                          <label className={`flex items-center gap-2 rounded-lg border px-3.5 py-2.5 text-xs font-bold cursor-pointer ${individualPaymentMode === 'group' ? 'border-amber-400 bg-amber-500/15 text-amber-300' : 'border-slate-700 text-slate-300'}`}>
+                          <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold cursor-pointer ${individualPaymentMode === 'group' ? 'border-amber-400 bg-amber-500/15 text-amber-300' : 'border-slate-700 text-slate-300'}`}>
                             <input
                               type="radio"
                               name="indPayMode"
@@ -1199,71 +1189,60 @@ export default function PublicRegisterPage() {
                               onChange={() => setIndividualPaymentMode('group')}
                               className="accent-amber-400"
                             />
-                            <span>團體匯款（由跑團統一匯款記註團體尾五碼）</span>
+                            <span>團體匯款</span>
                           </label>
                         </div>
                         {individualPaymentMode === 'group' && (
-                          <div>
-                            <label className="block text-xs font-bold text-amber-300 mb-1">
-                              所屬團體名稱（選填，協助承辦人對帳）
-                            </label>
-                            <input
-                              type="text"
-                              value={individualGroupName}
-                              onChange={(e) => setIndividualGroupName(e.target.value)}
-                              placeholder="例如：台北疾速跑團"
-                              className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2 text-sm text-white focus:border-amber-400 focus:outline-none"
-                            />
-                          </div>
+                          <input
+                            type="text"
+                            value={individualGroupName}
+                            onChange={(e) => setIndividualGroupName(e.target.value)}
+                            placeholder="團體名稱（選填，例：台北跑團）"
+                            className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2 text-sm text-white focus:border-amber-400 focus:outline-none"
+                          />
                         )}
                       </div>
                     )}
 
-                    {/* 團體報名的團體名稱與匯款方式設定 */}
+                    {/* 團體設定 */}
                     {regType === 'group' && (
-                      <div className="rounded-xl border border-sky-500/35 bg-sky-950/20 p-4 space-y-4">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="rounded-xl border border-sky-500/35 bg-sky-950/20 p-3.5 space-y-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                           <div>
-                            <label className="block text-xs font-bold text-sky-300 mb-1">
-                              團體名稱 *（可自由命名）
-                            </label>
+                            <label className="block text-xs font-bold text-sky-300 mb-1">團體名稱 *</label>
                             <input
                               type="text"
                               required
                               value={groupName}
                               onChange={(e) => setGroupName(e.target.value)}
-                              placeholder="例如：台灣超馬疾速聯隊"
-                              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-sky-400 focus:outline-none"
+                              placeholder="自訂團體名稱"
+                              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-sky-400 focus:outline-none"
                             />
                           </div>
                           <div>
-                            <label className="block text-xs font-bold text-sky-300 mb-1">
-                              本團匯款方式 *
-                            </label>
+                            <label className="block text-xs font-bold text-sky-300 mb-1">匯款方式 *</label>
                             <select
                               value={groupPaymentMode}
                               onChange={(e) => setGroupPaymentMode(e.target.value)}
-                              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm font-bold text-white focus:border-sky-400 focus:outline-none"
+                              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-bold text-white focus:border-sky-400 focus:outline-none"
                             >
-                              <option value="group">團體匯款（全團統一匯款，共用一組尾五碼）</option>
-                              <option value="individual">個別匯款（每位團員各自匯款填個人尾五碼）</option>
+                              <option value="group">團體匯款（共用尾五碼）</option>
+                              <option value="individual">個別匯款（各自填尾五碼）</option>
                             </select>
                           </div>
                         </div>
 
                         {groupPaymentMode === 'group' && (
-                          <div className="space-y-1.5">
-                            <label className="block text-xs font-bold text-amber-300">
-                              團體匯款帳號尾五碼（5 位數字；若尚未轉帳可先留空，匯款後再查詢補填）
-                            </label>
+                          <div className="space-y-1">
+                            <label className="block text-xs font-bold text-amber-300">團體匯款尾五碼</label>
                             <input
                               type="text"
                               inputMode="numeric"
                               maxLength={5}
                               value={groupRemittanceLast5}
                               onChange={(e) => setGroupRemittanceLast5(e.target.value.replace(/[^\d]/g, ''))}
-                              placeholder="例如：54321（將自動套用記註於本團所有成員）"
-                              className={`w-full rounded-xl border bg-slate-950 px-3.5 py-2.5 font-mono-num text-sm text-white focus:outline-none ${
+                              placeholder="5 位數字（尚未匯款可留空）"
+                              className={`w-full rounded-xl border bg-slate-950 px-3 py-2 font-mono-num text-sm text-white focus:outline-none ${
                                 groupRemittanceLast5 && validateRemittanceLast5(groupRemittanceLast5)
                                   ? 'border-rose-500 focus:border-rose-500'
                                   : groupRemittanceLast5.length === 5
@@ -1276,9 +1255,7 @@ export default function PublicRegisterPage() {
                                 {validateRemittanceLast5(groupRemittanceLast5)}
                               </p>
                             ) : groupRemittanceLast5.length === 5 ? (
-                              <p className="text-xs font-bold text-emerald-400">
-                                ✓ 團體匯款尾五碼格式正確（將套用至全團成員）
-                              </p>
+                              <p className="text-xs font-bold text-emerald-400">✓ 尾五碼正確</p>
                             ) : null}
                           </div>
                         )}
@@ -1295,8 +1272,8 @@ export default function PublicRegisterPage() {
 
                   {/* 步驟 2：個人或團體成員資料填寫 */}
                   {regType === 'individual' ? (
-                    <div className="space-y-5">
-                      <h3 className="text-lg font-black text-white">2. 填寫跑者個人報名資料</h3>
+                    <div className="space-y-4">
+                      <h3 className="text-base font-black text-white">報名資料</h3>
                       {(event.fields || []).map((field) => (
                         <div key={field.id} id={`field-wrap-${field.id}`}>
                           <DynamicFormField
@@ -1311,10 +1288,10 @@ export default function PublicRegisterPage() {
                       ))}
                     </div>
                   ) : (
-                    <div className="space-y-5">
+                    <div className="space-y-4">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <h3 className="text-lg font-black text-white">
-                          2. 填寫團體成員資料（目前 {groupMembers.length} 位）
+                        <h3 className="text-base font-black text-white">
+                          團員資料（{groupMembers.length} 位）
                         </h3>
                         <button
                           type="button"
@@ -1404,15 +1381,15 @@ export default function PublicRegisterPage() {
                       {submitting ? (
                         <>
                           <Loader2 className="h-5 w-5 animate-spin" />
-                          <span>資料驗證、登錄並寄發 Email 中...</span>
+                          <span>送出中...</span>
                         </>
                       ) : (
                         <>
                           <Send className="h-5 w-5" />
                           <span>
                             {regType === 'group'
-                              ? `確認並送出團體報名（共 ${groupMembers.length} 位）`
-                              : '確認資料並送出個人報名'}
+                              ? `送出團體報名（${groupMembers.length} 位）`
+                              : '送出報名'}
                           </span>
                         </>
                       )}
@@ -1422,21 +1399,21 @@ export default function PublicRegisterPage() {
               )}
             </div>
 
-            {/* 右側：即時費用試算 + 匯款帳戶資訊 */}
-            <aside className="hidden lg:block lg:col-span-4 sticky top-24 space-y-5">
+            {/* 右側：費用試算 + 匯款帳戶 */}
+            <aside className="hidden lg:block lg:col-span-4 sticky top-20 space-y-4">
               {canRegister && (
-                <div className="tur-control-bar rounded-2xl p-6">
-                  <div className="flex items-center gap-2 text-amber-300 font-bold mb-4">
-                    <Calculator className="h-5 w-5" />
-                    <span>{regType === 'group' ? '團體即時費用加總摘要' : '即時費用試算摘要'}</span>
+                <div className="tur-control-bar rounded-2xl p-5">
+                  <div className="flex items-center gap-2 text-amber-300 text-sm font-bold mb-3">
+                    <Calculator className="h-4 w-4" />
+                    <span>費用試算</span>
                   </div>
 
                   {regType === 'group' ? (
-                    <ul className="space-y-2.5 text-sm border-b border-slate-800 pb-4 mb-4">
+                    <ul className="space-y-2 text-sm border-b border-slate-800 pb-3 mb-3">
                       {groupMembers.map((m, idx) => (
                         <li key={idx} className="flex items-center justify-between gap-2">
                           <span className="text-slate-200 truncate">
-                            第 {idx + 1} 位：{m.full_name || '尚未填姓名'}
+                            #{idx + 1} {m.full_name || '未填姓名'}
                           </span>
                           <span className="font-mono-num font-bold text-amber-300 shrink-0">
                             NT$ {Number(groupPricingList[idx]?.total || 0).toLocaleString()}
@@ -1445,13 +1422,10 @@ export default function PublicRegisterPage() {
                       ))}
                     </ul>
                   ) : pricing.breakdown.length > 0 ? (
-                    <ul className="space-y-2.5 text-sm border-b border-slate-800 pb-4 mb-4">
+                    <ul className="space-y-2 text-sm border-b border-slate-800 pb-3 mb-3">
                       {pricing.breakdown.map((item, i) => (
                         <li key={i} className="flex items-start justify-between gap-2">
-                          <div>
-                            <p className="text-xs text-slate-400">{item.fieldLabel}</p>
-                            <p className="font-medium text-slate-100">{item.itemLabel}</p>
-                          </div>
+                          <span className="font-medium text-slate-200">{item.itemLabel}</span>
                           <span className="font-mono-num font-bold text-amber-300 shrink-0">
                             NT$ {item.amount.toLocaleString()}
                           </span>
@@ -1459,16 +1433,14 @@ export default function PublicRegisterPage() {
                       ))}
                     </ul>
                   ) : (
-                    <p className="text-sm text-slate-400 border-b border-slate-800 pb-4 mb-4">
-                      請於左側選擇「報名組別」或加購項目，系統將自動為您累計費用。
+                    <p className="text-xs text-slate-400 border-b border-slate-800 pb-3 mb-3">
+                      選擇組別後自動計算
                     </p>
                   )}
 
                   <div className="flex items-baseline justify-between">
-                    <span className="text-sm font-bold text-slate-300">
-                      {regType === 'group' ? '全團應繳總額' : '應繳總金額'}
-                    </span>
-                    <span className="font-mono-num text-3xl font-black text-white">
+                    <span className="text-sm font-bold text-slate-300">總計</span>
+                    <span className="font-mono-num text-2xl font-black text-white">
                       NT$ {(regType === 'group' ? groupTotalAmount : pricing.total).toLocaleString()}
                     </span>
                   </div>
@@ -1477,9 +1449,9 @@ export default function PublicRegisterPage() {
 
               {event.payment_info && (
                 <div className="tur-card rounded-2xl border border-slate-800 bg-slate-900/85 p-5">
-                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-sky-400 mb-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-sky-400 mb-2">
                     <CreditCard className="h-4 w-4" />
-                    <span>匯款帳戶資訊（轉帳後填後五碼）</span>
+                    <span>匯款帳戶</span>
                   </div>
                   <p className="whitespace-pre-line text-xs text-slate-300 leading-relaxed">
                     {event.payment_info}

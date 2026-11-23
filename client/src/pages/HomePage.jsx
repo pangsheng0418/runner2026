@@ -145,53 +145,38 @@ export default function HomePage() {
   return (
     <div className="min-h-screen flex flex-col">
       <TurHeader
-        title="TUR 路跑活動線上報名平台"
-        subtitle="按月份條列所有開放中賽事・點擊活動可展開完整摘要或直接線上報名"
-        statusLabel="線上報名服務運行中"
+        title="TUR 活動報名平台"
         showLookupLink
         showAdminLink
       />
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 sm:px-6 pt-6 space-y-5">
-        {/* 頂部篩選控制列（搜尋 + 月份快速切換） */}
-        <section className="tur-control-bar rounded-2xl p-4 space-y-3.5">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 sm:px-6 pt-5 space-y-4">
+        {/* 頂部篩選控制列 */}
+        <section className="tur-control-bar rounded-2xl p-3.5 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2">
               <Trophy className="h-5 w-5 text-lime-400 shrink-0" />
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-base sm:text-lg font-black tracking-wide text-white">
-                    開放報名中賽事清單
-                  </h2>
-                  <span className="rounded-full bg-emerald-500/20 border border-emerald-400/40 px-2.5 py-0.5 font-mono-num text-xs font-extrabold text-emerald-300">
-                    共 {events.length} 場開放中
-                  </span>
-                </div>
-                <p className="text-xs text-slate-400">
-                  依賽事月份由近至遠排列，單一畫面即可檢視各活動摘要、組別與報名期限
-                </p>
-              </div>
+              <h2 className="text-base font-black text-white">開放中活動</h2>
+              <span className="rounded-full bg-emerald-500/20 border border-emerald-400/40 px-2 py-0.5 font-mono-num text-xs font-extrabold text-emerald-300">
+                {events.length} 場
+              </span>
             </div>
 
-            <div className="relative w-full sm:w-80">
-              <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <div className="relative w-full sm:w-72">
+              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <input
                 type="text"
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
-                placeholder="搜尋賽事名稱、地點、摘要或主辦單位..."
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 pl-10 pr-4 py-2 text-xs sm:text-sm text-white placeholder-slate-500 focus:border-lime-400 focus:outline-none"
+                placeholder="搜尋活動、地點..."
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 py-1.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:border-lime-400 focus:outline-none"
               />
             </div>
           </div>
 
-          {/* 月份快速篩選膠囊 */}
+          {/* 月份快篩 */}
           {monthOptions.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-800/80">
-              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-400 mr-1">
-                <Calendar className="h-3.5 w-3.5 text-lime-400" />
-                月份篩選：
-              </span>
               <button
                 type="button"
                 onClick={() => setSelectedMonth('all')}
@@ -201,7 +186,7 @@ export default function HomePage() {
                     : 'border-slate-700 bg-slate-950/80 text-slate-300 hover:border-slate-500 hover:text-white'
                 }`}
               >
-                全部月份 ({events.length})
+                全部 ({events.length})
               </button>
               {monthOptions.map((m) => (
                 <button
@@ -307,45 +292,38 @@ export default function HomePage() {
                             />
                           </div>
 
-                          {/* 中間：標題、摘要、地點、組別與報名期限 */}
+                          {/* 中間：標題、摘要、地點、組別 */}
                           <div className="min-w-0 flex-1 space-y-1">
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className="rounded-full bg-emerald-500/20 border border-emerald-400/40 px-2 py-0.5 text-[10px] font-extrabold text-emerald-300 shrink-0">
-                                ● 開放中
-                              </span>
                               <Link
                                 to={`/register/${ev.slug}`}
-                                className="text-base sm:text-lg font-black text-white hover:text-lime-300 transition truncate"
+                                className="text-base font-black text-white hover:text-lime-300 transition truncate"
                               >
                                 {ev.name}
                               </Link>
                               {ev.organizer_name && (
-                                <span className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-950/80 px-2 py-0.5 text-[11px] font-semibold text-slate-300 shrink-0">
-                                  <Building2 className="h-3 w-3 text-slate-400" />
+                                <span className="inline-flex items-center gap-1 text-[11px] text-slate-400 shrink-0">
+                                  <Building2 className="h-3 w-3" />
                                   {ev.organizer_name}
                                 </span>
                               )}
                             </div>
 
-                            {/* 同一畫面即時顯示活動摘要 */}
                             <p className="text-xs text-slate-300 line-clamp-1">
                               {summaryText}
                             </p>
 
-                            {/* 關鍵資訊迷你列：地點、報名期限、組別標籤 */}
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-400 pt-0.5">
+                            <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[11px] text-slate-400">
                               {ev.location && (
                                 <span className="inline-flex items-center gap-1 max-w-xs truncate">
-                                  <MapPin className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                                  <MapPin className="h-3 w-3 text-emerald-400 shrink-0" />
                                   <span className="truncate">{ev.location}</span>
                                 </span>
                               )}
-                              {(ev.reg_start_at || ev.reg_end_at) && (
+                              {ev.reg_end_at && (
                                 <span className="inline-flex items-center gap-1 font-mono-num">
-                                  <Clock className="h-3.5 w-3.5 text-sky-400 shrink-0" />
-                                  <span>
-                                    報名：{formatDtShort(ev.reg_start_at)} ~ {formatDtShort(ev.reg_end_at)}
-                                  </span>
+                                  <Clock className="h-3 w-3 text-sky-400 shrink-0" />
+                                  <span>截止 {formatDtShort(ev.reg_end_at)}</span>
                                 </span>
                               )}
                               {categories.length > 0 && (
@@ -359,14 +337,14 @@ export default function HomePage() {
                             </div>
                           </div>
 
-                          {/* 右側：摘要展開 + 立即報名按鈕（首頁不顯示名額） */}
+                          {/* 右側：摘要 + 報名 */}
                           <div className="flex flex-wrap lg:flex-nowrap items-center justify-end gap-2 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-800/80">
                             <button
                               type="button"
                               onClick={() => setExpandedId(isExpanded ? null : ev.id)}
-                              className="inline-flex items-center gap-1 rounded-xl border border-slate-700 bg-slate-950/90 px-3 py-2 text-xs font-bold text-slate-300 hover:border-sky-400 hover:text-sky-300 transition"
+                              className="inline-flex items-center gap-1 rounded-xl border border-slate-700 bg-slate-950/90 px-3 py-1.5 text-xs font-bold text-slate-300 hover:border-sky-400 hover:text-sky-300 transition"
                             >
-                              <span>{isExpanded ? '收合摘要' : '詳細摘要'}</span>
+                              <span>{isExpanded ? '收合' : '摘要'}</span>
                               {isExpanded ? (
                                 <ChevronUp className="h-3.5 w-3.5" />
                               ) : (
@@ -376,9 +354,9 @@ export default function HomePage() {
 
                             <Link
                               to={`/register/${ev.slug}`}
-                              className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 px-4 py-2 text-xs sm:text-sm font-black text-slate-950 hover:from-emerald-400 hover:to-lime-300 shadow-md shadow-emerald-950/40 transition whitespace-nowrap"
+                              className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 px-4 py-1.5 text-xs sm:text-sm font-black text-slate-950 hover:from-emerald-400 hover:to-lime-300 shadow-md shadow-emerald-950/40 transition whitespace-nowrap"
                             >
-                              <span>立即報名</span>
+                              <span>報名</span>
                               <ArrowRight className="h-3.5 w-3.5" />
                             </Link>
                           </div>

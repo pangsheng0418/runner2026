@@ -51,7 +51,8 @@ function isValidTaiwanIdOrPassport(raw) {
   };
 }
 
-const MIN_REGISTRATION_AGE = 16;
+const MIN_REGISTRATION_AGE = 10;
+const MAX_REGISTRATION_AGE = 80;
 
 function isValidEmail(raw) {
   const value = String(raw || '').trim();
@@ -89,18 +90,15 @@ function calculateAge(birthDateStr, referenceDate = new Date()) {
   return age;
 }
 
-function validateBirthDateAge(raw, minAge = MIN_REGISTRATION_AGE) {
+function validateBirthDateAge(raw, minAge = MIN_REGISTRATION_AGE, maxAge = MAX_REGISTRATION_AGE) {
   const age = calculateAge(raw);
   if (age === null) {
     return { valid: false, message: '請選擇有效的出生年月日' };
   }
-  if (age < 0 || age > 120) {
-    return { valid: false, message: '出生年月日不合理，請重新確認' };
-  }
-  if (age < minAge) {
+  if (age < minAge || age > maxAge) {
     return {
       valid: false,
-      message: `本活動限滿 ${minAge} 歲以上報名（目前實歲 ${age} 歲，不符報名資格）`,
+      message: `年齡限 ${minAge}～${maxAge} 歲（目前實歲 ${age} 歲，請確認是否輸入有誤）`,
     };
   }
   return { valid: true, age };
@@ -192,10 +190,11 @@ function validateAndCalculateRegistration(fields, rawAnswers) {
 
     if (
       field.id === 'birth_date' ||
+      field.validation === 'age_10_80' ||
       field.validation === 'min_age_16' ||
       (field.type === 'date' && String(field.label || '').includes('出生'))
     ) {
-      const ageCheck = validateBirthDateAge(strVal, MIN_REGISTRATION_AGE);
+      const ageCheck = validateBirthDateAge(strVal, MIN_REGISTRATION_AGE, MAX_REGISTRATION_AGE);
       if (!ageCheck.valid) {
         errors[field.id] = ageCheck.message;
         continue;
