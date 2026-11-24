@@ -6,10 +6,38 @@
   color-scheme: dark;
 }
 
+/* 全站字體放大基準（預設 18px，並支援使用者依需求即時切換四段字級） */
+html {
+  font-size: 18px;
+}
+html[data-font-scale="sm"] {
+  font-size: 16px;
+}
+html[data-font-scale="md"] {
+  font-size: 18px;
+}
+html[data-font-scale="lg"] {
+  font-size: 20px;
+}
+html[data-font-scale="xl"] {
+  font-size: 22px;
+}
+
+/* 讓既有小標籤字級隨全站字級比例同步放大 */
+.text-\[11px\] {
+  font-size: 0.78rem !important;
+  line-height: 1.35 !important;
+}
+.text-\[10px\] {
+  font-size: 0.72rem !important;
+  line-height: 1.3 !important;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Noto Sans TC", "Microsoft JhengHei", "Segoe UI", Roboto, sans-serif;
   background-color: #020617;
   color: #f8fafc;
+  font-size: 1rem;
 }
 
 /* TUR 官方深邃舞台背景：36px 細網格 + 萊姆綠 / 天空藍 / 琥珀金 三向環境光暈 */

@@ -1,7 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Sun, Moon, Home, ShieldCheck, Search } from 'lucide-react';
+import { Sun, Moon, Home, ShieldCheck, Search, Type } from 'lucide-react';
 import TurLogo from './TurLogo';
+import {
+  FONT_SCALES,
+  applyFontScale,
+  getSavedFontScale,
+  subscribeFontScale,
+} from '../utils/fontScale';
 
 export default function TurHeader({
   title = 'TUR 活動報名平台',
@@ -15,6 +21,7 @@ export default function TurHeader({
   const [highContrast, setHighContrast] = useState(
     () => typeof document !== 'undefined' && document.body.classList.contains('high-contrast')
   );
+  const [fontScale, setFontScale] = useState(() => getSavedFontScale());
 
   useEffect(() => {
     if (highContrast) {
@@ -24,6 +31,12 @@ export default function TurHeader({
     }
   }, [highContrast]);
 
+  useEffect(() => subscribeFontScale(setFontScale), []);
+
+  const handleSelectFont = (key) => {
+    setFontScale(applyFontScale(key));
+  };
+
   return (
     <header className="sticky top-0 z-30 tur-header-bar">
       <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-2.5">
@@ -32,16 +45,43 @@ export default function TurHeader({
             <TurLogo size="sm" />
           </Link>
           <div className="min-w-0">
-            <h1 className="text-sm sm:text-base font-black tracking-wide text-white truncate">
+            <h1 className="text-base sm:text-lg font-black tracking-wide text-white truncate">
               {title}
             </h1>
             {subtitle && (
-              <p className="hidden md:block text-[11px] text-slate-400 truncate">{subtitle}</p>
+              <p className="hidden md:block text-xs text-slate-400 truncate">{subtitle}</p>
             )}
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* 全站字體大小調整器 */}
+          <div
+            role="group"
+            aria-label="字體大小調整"
+            className="inline-flex items-center gap-0.5 rounded-xl border border-slate-700/90 bg-slate-950/90 p-0.5"
+          >
+            <span className="inline-flex items-center gap-1 pl-2 pr-1 text-xs font-bold text-slate-400">
+              <Type className="h-3.5 w-3.5 text-lime-400" />
+              <span className="hidden sm:inline">字體</span>
+            </span>
+            {FONT_SCALES.map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => handleSelectFont(opt.key)}
+                aria-pressed={fontScale === opt.key}
+                className={`rounded-lg px-2 py-1 text-xs font-extrabold transition ${
+                  fontScale === opt.key
+                    ? 'bg-lime-400 text-slate-950'
+                    : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
           <button
             type="button"
             onClick={() => setHighContrast((v) => !v)}
