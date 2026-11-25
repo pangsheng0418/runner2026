@@ -52,10 +52,10 @@ function seedDemoDataset() {
   const gasUrl = master.gasUrl || '';
   const defaultFields = getDefaultRunningFields();
 
-  // 1. 建立 2 位獨立一般承辦人帳號（若已存在則直接沿用）
+  // 1. 建立 2 位獨立一般承辦人帳號（若已存在且仍為舊預設密碼則同步更新為 admin1234）
   const demoOrganizers = [
-    { username: 'org_north', display_name: '台北超馬承辦小組', password: 'runner2026' },
-    { username: 'org_south', display_name: '高雄路跑承辦小組', password: 'runner2026' },
+    { username: 'org_north', display_name: '台北超馬承辦小組', password: 'admin1234' },
+    { username: 'org_south', display_name: '高雄路跑承辦小組', password: 'admin1234' },
   ];
 
   const orgMap = {};
@@ -69,6 +69,10 @@ function seedDemoDataset() {
         .run(o.username, hash, o.display_name, 'organizer');
       row = db.prepare('SELECT * FROM admins WHERE id = ?').get(info.lastInsertRowid);
       createdOrganizers += 1;
+    } else if (row.password_hash && bcrypt.compareSync('runner2026', row.password_hash)) {
+      const nextHash = bcrypt.hashSync(o.password, 10);
+      db.prepare('UPDATE admins SET password_hash = ? WHERE id = ?').run(nextHash, row.id);
+      row.password_hash = nextHash;
     }
     orgMap[o.username] = row;
   }

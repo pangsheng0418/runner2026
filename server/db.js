@@ -315,7 +315,7 @@ function getDefaultRunningFields() {
 function seedInitialData() {
   // 1. 建立預設管理員帳號
   const adminUsername = process.env.ADMIN_USERNAME || 'admin';
-  const adminPassword = process.env.ADMIN_PASSWORD || 'runner2026';
+  const adminPassword = process.env.ADMIN_PASSWORD || 'admin1234';
 
   let defaultAdmin = db.prepare('SELECT * FROM admins WHERE username = ?').get(adminUsername);
   if (!defaultAdmin) {
@@ -325,9 +325,25 @@ function seedInitialData() {
       .run(adminUsername, hash, 'TUR 賽事總監', 'super_admin');
     defaultAdmin = db.prepare('SELECT * FROM admins WHERE id = ?').get(info.lastInsertRowid);
     console.log(`[Seed] 已建立預設承辦管理帳號：${adminUsername}`);
-  } else if (!defaultAdmin.role || defaultAdmin.role === 'organizer') {
-    db.prepare("UPDATE admins SET role = 'super_admin' WHERE id = ?").run(defaultAdmin.id);
-    defaultAdmin.role = 'super_admin';
+  } else {
+    if (!defaultAdmin.role || defaultAdmin.role === 'organizer') {
+      db.prepare("UPDATE admins SET role = 'super_admin' WHERE id = ?").run(defaultAdmin.id);
+      defaultAdmin.role = 'super_admin';
+    }
+    // 若既有預設帳號仍沿用舊版預設密碼 runner2026，自動升級為新預設密碼 admin1234
+    if (defaultAdmin.password_hash && bcrypt.compareSync('runner2026', defaultAdmin.password_hash)) {
+      const nextHash = bcrypt.hashSync(adminPassword, 10);
+      db.prepare('UPDATE admins SET password_hash = ? WHERE id = ?').run(nextHash, defaultAdmin.id);
+      defaultAdmin.password_hash = nextHash;
+    }
+  }
+
+  // 若既有測試承辦人仍沿用舊版預設密碼 runner2026，同步升級為 admin1234
+  for (const demoUser of ['org_north', 'org_south']) {
+    const row = db.prepare('SELECT id, password_hash FROM admins WHERE lower(username) = ?').get(demoUser);
+    if (row && row.password_hash && bcrypt.compareSync('runner2026', row.password_hash)) {
+      db.prepare('UPDATE admins SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync('admin1234', 10), row.id);
+    }
   }
 
   // 補齊舊活動缺漏的承辦人資訊

@@ -30,4 +30,4 @@ npm.cmd start
 
 - **前台報名平台**：`http://localhost:3000`
 - **選手反向查詢與改報**：`http://localhost:3000/lookup`
-- **後台管理入口**：`http://localhost:3000/admin/login`（預設最高權限：`admin` / `runner2026`）
+- **後台管理入口**：`http://localhost:3000/admin/login`（預設最高權限：`admin` / `admin1234`）
