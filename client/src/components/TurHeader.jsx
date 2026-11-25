@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Sun, Moon, Home, ShieldCheck, Search, Type, Crown } from 'lucide-react';
+import { Sun, Moon, Home, ShieldCheck, Search, Type } from 'lucide-react';
 import TurLogo from './TurLogo';
 import {
   FONT_SCALES,
@@ -116,22 +116,13 @@ export default function TurHeader({
           )}
 
           {showAdminLink && (
-            <>
-              <Link
-                to="/admin"
-                className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3 py-1.5 text-xs font-extrabold text-emerald-300 hover:bg-emerald-500/25 transition"
-              >
-                <ShieldCheck className="h-3.5 w-3.5" />
-                <span>後台管理</span>
-              </Link>
-              <Link
-                to="/admin/login?mode=super_admin"
-                className="inline-flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3 py-1.5 text-xs font-extrabold text-amber-300 hover:bg-amber-500/25 transition"
-              >
-                <Crown className="h-3.5 w-3.5" />
-                <span>最高管理權限</span>
-              </Link>
-            </>
+            <Link
+              to="/admin"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3 py-1.5 text-xs font-extrabold text-amber-300 hover:bg-amber-500/25 transition"
+            >
+              <ShieldCheck className="h-3.5 w-3.5" />
+              <span>後台管理</span>
+            </Link>
           )}
 
           {rightSlot}
