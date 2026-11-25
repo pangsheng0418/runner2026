@@ -43,8 +43,8 @@ const PRESET_BANNERS = [
     url: 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&w=1600&q=80',
   },
   {
-    name: '馬拉松集體起跑',
-    url: 'https://images.unsplash.com/photo-1513593771513-7b58b6c4af38?auto=format&fit=crop&w=1600&q=80',
+    name: '雲海稜線越野',
+    url: '/banners/mountain-ridge-run.jpg',
   },
   {
     name: '夜間疾速街跑',
@@ -63,12 +63,12 @@ const PRESET_BANNERS = [
     url: 'https://images.unsplash.com/photo-1486218119243-13883505764c?auto=format&fit=crop&w=1600&q=80',
   },
   {
-    name: '晨曦長跑節奏',
-    url: 'https://images.unsplash.com/photo-1571008887538-b36bb32f4571?auto=format&fit=crop&w=1600&q=80',
+    name: '溪谷晨光疾跑',
+    url: '/banners/valley-sunrise-run.jpg',
   },
   {
-    name: '林蔭公園慢跑',
-    url: 'https://images.unsplash.com/photo-1530549387789-4c1017266635?auto=format&fit=crop&w=1600&q=80',
+    name: '森呼吸林道衝刺',
+    url: '/banners/forest-sunbeam-run.jpg',
   },
   {
     name: '賽事終點衝線',

@@ -314,7 +314,7 @@ router.post('/', async (req, res) => {
     String(body.banner_subtitle || '熱血開跑・歡迎報名參與'),
     String(
       body.banner_image_url ||
-        'https://images.unsplash.com/photo-1513593771513-7b58b6c4af38?auto=format&fit=crop&w=1600&q=80'
+        '/banners/valley-sunrise-run.jpg'
     ),
     String(body.description || ''),
     String(body.payment_info || '報名完成後請依指定帳戶完成繳費，並保留報名序號以便核對與分配參賽編號。'),
