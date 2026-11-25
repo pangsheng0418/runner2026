@@ -135,7 +135,7 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_events_owner_admin_id ON events(owner_ad
 /**
  * 路跑活動標準預設欄位範本（建立新活動時自動帶入）
  * 預設欄位：姓名、性別、身份證字號、出生年月日、連絡電話、電子信箱、
- * 緊急聯絡人姓名、報名組別、加購賽事服務、匯款帳號尾五碼、飲食習慣（葷/素）、備考、本次報名應繳總金額
+ * 緊急聯絡人姓名、緊急聯絡人電話、報名組別、賽事加購服務、匯款帳號尾五碼、飲食習慣（葷/素）、備考、本次報名應繳總金額
  */
 function getDefaultRunningFields() {
   return [
@@ -218,6 +218,17 @@ function getDefaultRunningFields() {
       options: [],
       unitPrice: 0,
       validation: 'none',
+    },
+    {
+      id: 'emergency_phone',
+      label: '緊急聯絡人電話',
+      type: 'tel',
+      required: true,
+      placeholder: '0912345678（手機 10 碼）',
+      helperText: '',
+      options: [],
+      unitPrice: 0,
+      validation: 'phone',
     },
     {
       id: 'race_category',
@@ -326,16 +337,44 @@ function seedInitialData() {
      WHERE owner_admin_id IS NULL OR owner_admin_id = 0 OR owner_username = ''`
   ).run(defaultAdmin.id, defaultAdmin.username, defaultAdmin.display_name);
 
-  // 補齊既有活動表單若尚未包含「匯款帳號後五碼」欄位
+  // 補齊既有活動表單若尚未包含「緊急聯絡人電話」或「匯款帳號尾五碼」欄位
   const existingEventsForFieldCheck = db.prepare('SELECT id, fields_json FROM events').all();
-  const remittanceFieldTemplate = getDefaultRunningFields().find((f) => f.id === 'remittance_last5');
+  const defaultTemplateList = getDefaultRunningFields();
+  const emergencyPhoneTemplate = defaultTemplateList.find((f) => f.id === 'emergency_phone');
+  const remittanceFieldTemplate = defaultTemplateList.find((f) => f.id === 'remittance_last5');
   for (const ev of existingEventsForFieldCheck) {
     try {
       const parsedFields = JSON.parse(ev.fields_json || '[]');
+      if (!Array.isArray(parsedFields)) continue;
+      let changed = false;
+
       if (
-        Array.isArray(parsedFields) &&
+        emergencyPhoneTemplate &&
+        !parsedFields.some(
+          (f) =>
+            f.id === 'emergency_phone' ||
+            /緊急[聯連]絡人電話/.test(String(f.label || ''))
+        )
+      ) {
+        const emNameIdx = parsedFields.findIndex(
+          (f) => f.id === 'emergency_name' || /緊急[聯連]絡人/.test(String(f.label || ''))
+        );
+        if (emNameIdx !== -1) {
+          parsedFields.splice(emNameIdx + 1, 0, emergencyPhoneTemplate);
+        } else {
+          parsedFields.push(emergencyPhoneTemplate);
+        }
+        changed = true;
+      }
+
+      if (
         remittanceFieldTemplate &&
-        !parsedFields.some((f) => f.id === 'remittance_last5' || String(f.label || '').includes('後五碼'))
+        !parsedFields.some(
+          (f) =>
+            f.id === 'remittance_last5' ||
+            String(f.label || '').includes('後五碼') ||
+            String(f.label || '').includes('尾五碼')
+        )
       ) {
         const notesIdx = parsedFields.findIndex((f) => f.id === 'notes');
         if (notesIdx !== -1) {
@@ -343,6 +382,10 @@ function seedInitialData() {
         } else {
           parsedFields.push(remittanceFieldTemplate);
         }
+        changed = true;
+      }
+
+      if (changed) {
         db.prepare('UPDATE events SET fields_json = ? WHERE id = ?').run(JSON.stringify(parsedFields), ev.id);
       }
     } catch (_) {
