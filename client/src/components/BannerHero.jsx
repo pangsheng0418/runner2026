@@ -96,6 +96,16 @@ export default function BannerHero({ event, compact = false }) {
               <span>{event.location}</span>
             </div>
           )}
+          <div className="flex items-center gap-1.5 rounded-lg bg-slate-900/85 px-3 py-1.5 border border-lime-400/35">
+            <Users className="h-3.5 w-3.5 text-lime-400" />
+            <span className="text-slate-300">報名人員</span>
+            <strong className="font-mono-num font-black text-lime-300">
+              {count} / {max > 0 ? max : '不限'}
+            </strong>
+            {max > 0 && (
+              <span className="font-mono-num text-[11px] text-slate-400">({ratio}%)</span>
+            )}
+          </div>
         </div>
 
         {!compact && status === 'preparing' && event?.reg_start_at && (

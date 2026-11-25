@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -12,10 +12,8 @@ import {
   Upload,
   CheckCircle2,
   AlertTriangle,
-  RefreshCw,
   Download,
   Copy,
-  Sparkles,
   Loader2,
   Eye,
   Cpu,
@@ -23,12 +21,21 @@ import {
   Send,
   Database,
   X,
+  CreditCard,
+  Edit3,
+  Trash2,
+  Lock,
+  Sparkles,
+  Calculator,
+  AlertCircle,
 } from 'lucide-react';
 import { apiRequest, getAdminToken, setAdminToken } from '../api/client';
+import { generateEnglishEventName } from '../utils/raceNameTranslator';
+import { calculatePricing } from '../utils/validation';
 import TurLogo from '../components/TurLogo';
 import BannerHero from '../components/BannerHero';
 import FormBuilder from '../components/FormBuilder';
-import SyncStatusBadge from '../components/SyncStatusBadge';
+import DynamicFormField from '../components/DynamicFormField';
 
 const PRESET_BANNERS = [
   {
@@ -47,6 +54,30 @@ const PRESET_BANNERS = [
     name: '田徑場跑道衝刺',
     url: 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?auto=format&fit=crop&w=1600&q=80',
   },
+  {
+    name: '山林越野跑道',
+    url: 'https://images.unsplash.com/photo-1502224562085-639556652f33?auto=format&fit=crop&w=1600&q=80',
+  },
+  {
+    name: '海岸公路路跑',
+    url: 'https://images.unsplash.com/photo-1486218119243-13883505764c?auto=format&fit=crop&w=1600&q=80',
+  },
+  {
+    name: '晨曦長跑節奏',
+    url: 'https://images.unsplash.com/photo-1571008887538-b36bb32f4571?auto=format&fit=crop&w=1600&q=80',
+  },
+  {
+    name: '林蔭公園慢跑',
+    url: 'https://images.unsplash.com/photo-1530549387789-4c1017266635?auto=format&fit=crop&w=1600&q=80',
+  },
+  {
+    name: '賽事終點衝線',
+    url: 'https://images.unsplash.com/photo-1594882645126-14020914d58d?auto=format&fit=crop&w=1600&q=80',
+  },
+  {
+    name: '黃昏河濱熱跑',
+    url: 'https://images.unsplash.com/photo-1532444458054-01a7dd3e9fca?auto=format&fit=crop&w=1600&q=80',
+  },
 ];
 
 export default function AdminEventEditorPage() {
@@ -57,16 +88,39 @@ export default function AdminEventEditorPage() {
   const [event, setEvent] = useState(null);
   const [currentAdmin, setCurrentAdmin] = useState(null);
   const [organizers, setOrganizers] = useState([]);
-  const [googleCreds, setGoogleCreds] = useState({ configured: false, serviceAccountEmail: '' });
   const [registrations, setRegistrations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [sheetBusy, setSheetBusy] = useState('');
+  const [busyAction, setBusyAction] = useState('');
   const [notice, setNotice] = useState({ type: '', text: '' });
   const [forbiddenError, setForbiddenError] = useState('');
+
+  // 中英賽事名稱自動同步旗標
+  const [englishManuallyEdited, setEnglishManuallyEdited] = useState(false);
+
+  // 名單檢視 / 修改 / 搜尋狀態
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedReg, setSelectedReg] = useState(null);
+  const [editingReg, setEditingReg] = useState(null);
+  const [editRegAnswers, setEditRegAnswers] = useState({});
+  const [editRegMeta, setEditRegMeta] = useState({
+    bib_number: '',
+    category_code: '',
+    payment_status: '待繳費',
+    reg_type: 'individual',
+    group_name: '',
+    group_code: '',
+    payment_mode: 'individual',
+    remittance_last5: '',
+    total_amount: 0,
+    manualAmount: false,
+  });
+  const [savingRegEdit, setSavingRegEdit] = useState(false);
+
+  // 對帳管理狀態
+  const [reconcileFilter, setReconcileFilter] = useState('all'); // 'all' | 'unpaid' | 'paid' | 'cancelled'
+  const [reconcileSearch, setReconcileSearch] = useState('');
 
   // 晶片系統對接頁狀態
   const [chipPaidOnly, setChipPaidOnly] = useState(true);
@@ -89,8 +143,13 @@ export default function AdminEventEditorPage() {
         apiRequest(`/api/admin/events/${id}`, { auth: true }),
         apiRequest(`/api/admin/events/${id}/registrations`, { auth: true }),
       ]);
-      setEvent(evRes.event);
-      if (evRes.googleCredentials) setGoogleCreds(evRes.googleCredentials);
+      const loadedEv = evRes.event;
+      setEvent(loadedEv);
+      // 若已有自訂英文名稱且與自動產生結果不同，先視為已手動編輯，避免無意覆蓋
+      const autoEn = generateEnglishEventName(loadedEv?.name || '');
+      setEnglishManuallyEdited(
+        Boolean(loadedEv?.english_name && loadedEv.english_name.trim() !== autoEn)
+      );
       if (evRes.currentAdmin) setCurrentAdmin(evRes.currentAdmin);
       if (Array.isArray(evRes.organizers)) setOrganizers(evRes.organizers);
       setRegistrations(regRes.registrations || []);
@@ -123,11 +182,28 @@ export default function AdminEventEditorPage() {
     }
   }, [tab, id, chipPaidOnly, registrations]);
 
+  const editRegPricing = useMemo(
+    () => calculatePricing(event?.fields || [], editRegAnswers),
+    [event, editRegAnswers]
+  );
+
   const updateEventField = (key, value) => {
     setEvent((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleSave = async (syncHeaders = false) => {
+  const handleEventChineseNameChange = (nextName) => {
+    setEvent((prev) => {
+      if (!prev) return prev;
+      const shouldAuto = !englishManuallyEdited || !String(prev.english_name || '').trim();
+      return {
+        ...prev,
+        name: nextName,
+        english_name: shouldAuto ? generateEnglishEventName(nextName) : prev.english_name,
+      };
+    });
+  };
+
+  const handleSave = async () => {
     if (!event) return;
     setSaving(true);
     setNotice({ type: '', text: '' });
@@ -137,7 +213,6 @@ export default function AdminEventEditorPage() {
         auth: true,
         body: {
           ...event,
-          syncHeaders,
         },
       });
       setEvent(res.event);
@@ -179,68 +254,9 @@ export default function AdminEventEditorPage() {
     try {
       const res = await apiRequest('/api/admin/events/default-fields', { auth: true });
       updateEventField('fields', res.fields);
-      showNotice('success', '已套用 TUR 路跑標準預設欄位，請點擊右上角「儲存變更」完成保存。');
+      showNotice('success', '已套用 TUR 路跑標準預設欄位（含非必選「賽事加購服務」3 項範例），請點擊右上角「儲存變更」完成保存。');
     } catch (err) {
       showNotice('error', err.message);
-    }
-  };
-
-  const handleTestSheet = async () => {
-    setSheetBusy('test');
-    try {
-      const res = await apiRequest(`/api/admin/events/${id}/sheets/test`, {
-        method: 'POST',
-        auth: true,
-        body: {
-          sheet_tab_name: event.sheet_tab_name,
-        },
-      });
-      showNotice(res.ok ? 'success' : 'warning', res.message);
-    } catch (err) {
-      showNotice('error', err.message);
-    } finally {
-      setSheetBusy('');
-    }
-  };
-
-  const handleSyncHeaders = async () => {
-    setSheetBusy('headers');
-    try {
-      await handleSave(true);
-    } finally {
-      setSheetBusy('');
-    }
-  };
-
-  const handlePullFromSheet = async () => {
-    setSheetBusy('pull');
-    try {
-      const res = await apiRequest(`/api/admin/events/${id}/registrations/pull-from-sheet`, {
-        method: 'POST',
-        auth: true,
-      });
-      await fetchEventData();
-      showNotice('success', res.message);
-    } catch (err) {
-      showNotice('error', err.message);
-    } finally {
-      setSheetBusy('');
-    }
-  };
-
-  const handleRetrySync = async () => {
-    setSheetBusy('retry');
-    try {
-      const res = await apiRequest(`/api/admin/events/${id}/registrations/retry-sync`, {
-        method: 'POST',
-        auth: true,
-      });
-      await fetchEventData();
-      showNotice(res.failCount > 0 ? 'warning' : 'success', res.message);
-    } catch (err) {
-      showNotice('error', err.message);
-    } finally {
-      setSheetBusy('');
     }
   };
 
@@ -299,7 +315,7 @@ export default function AdminEventEditorPage() {
   };
 
   const handleAutoAssignBibs = async (paidOnly = false) => {
-    setSheetBusy('bib');
+    setBusyAction('bib');
     try {
       const res = await apiRequest(`/api/admin/events/${id}/registrations/auto-assign-bibs`, {
         method: 'POST',
@@ -311,7 +327,146 @@ export default function AdminEventEditorPage() {
     } catch (err) {
       showNotice('error', err.message);
     } finally {
-      setSheetBusy('');
+      setBusyAction('');
+    }
+  };
+
+  // 開啟「修改報名者資料」彈窗
+  const openEditRegModal = (reg) => {
+    setEditingReg(reg);
+    setEditRegAnswers({ ...(reg.answers || {}) });
+    setEditRegMeta({
+      bib_number: reg.bib_number || '',
+      category_code: reg.category_code || '',
+      payment_status: reg.payment_status || '待繳費',
+      reg_type: reg.reg_type || 'individual',
+      group_name: reg.group_name || '',
+      group_code: reg.group_code || '',
+      payment_mode: reg.payment_mode || 'individual',
+      remittance_last5: reg.remittance_last5 || reg.answers?.remittance_last5 || '',
+      total_amount: Number(reg.total_amount || 0),
+      manualAmount: false,
+    });
+  };
+
+  const handleEditRegFieldChange = (fieldId, val) => {
+    setEditRegAnswers((prev) => {
+      const next = { ...prev, [fieldId]: val };
+      if (fieldId === 'remittance_last5') {
+        setEditRegMeta((m) => ({ ...m, remittance_last5: String(val || '') }));
+      }
+      return next;
+    });
+  };
+
+  const handleSaveRegistrationEdit = async (e) => {
+    e.preventDefault();
+    if (!editingReg) return;
+    setSavingRegEdit(true);
+    try {
+      const finalAmount = editRegMeta.manualAmount
+        ? Number(editRegMeta.total_amount || 0)
+        : editRegPricing.total;
+
+      const res = await apiRequest(`/api/admin/registrations/${editingReg.id}`, {
+        method: 'PUT',
+        auth: true,
+        body: {
+          bib_number: editRegMeta.bib_number,
+          category_code: editRegMeta.category_code,
+          payment_status: editRegMeta.payment_status,
+          reg_type: editRegMeta.reg_type,
+          group_name: editRegMeta.group_name,
+          group_code: editRegMeta.group_code,
+          payment_mode: editRegMeta.payment_mode,
+          remittance_last5: editRegMeta.remittance_last5,
+          total_amount: finalAmount,
+          answers: {
+            ...editRegAnswers,
+            remittance_last5: editRegMeta.remittance_last5,
+          },
+        },
+      });
+      setRegistrations((prev) =>
+        prev.map((r) => (r.id === editingReg.id ? res.registration : r))
+      );
+      setEditingReg(null);
+      showNotice('success', res.message);
+    } catch (err) {
+      showNotice('error', err.message);
+    } finally {
+      setSavingRegEdit(false);
+    }
+  };
+
+  // 刪除單筆報名資料
+  const handleDeleteRegistration = async (reg) => {
+    if (
+      !window.confirm(
+        `確定要刪除「${reg.runner_name || '未填姓名'}（${reg.reg_code}）」的報名資料嗎？\n此操作無法復原。`
+      )
+    ) {
+      return;
+    }
+    try {
+      const res = await apiRequest(`/api/admin/registrations/${reg.id}`, {
+        method: 'DELETE',
+        auth: true,
+      });
+      setRegistrations((prev) => prev.filter((r) => r.id !== reg.id));
+      showNotice('success', res.message);
+    } catch (err) {
+      showNotice('error', err.message);
+    }
+  };
+
+  // 一鍵清空本活動所有報名名單
+  const handleClearAllRegistrations = async () => {
+    if (registrations.length === 0) {
+      showNotice('warning', '本活動目前沒有任何報名名單可清空。');
+      return;
+    }
+    const ok = window.confirm(
+      `警告！確定要「一鍵清空」本活動「${event.name}」的全部 ${registrations.length} 筆報名名單嗎？\n此操作將永久刪除本活動所有名單且無法復原！`
+    );
+    if (!ok) return;
+
+    setBusyAction('clear_all');
+    try {
+      const res = await apiRequest(`/api/admin/events/${id}/registrations`, {
+        method: 'DELETE',
+        auth: true,
+      });
+      setRegistrations([]);
+      showNotice('success', res.message);
+    } catch (err) {
+      showNotice('error', err.message);
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  // 匯出 Excel (.xlsx)
+  const handleExportExcel = async () => {
+    setBusyAction('excel');
+    try {
+      const token = getAdminToken();
+      const res = await fetch(`/api/admin/events/${id}/registrations/export-excel`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('匯出 Excel 檔案失敗');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${event?.name || 'event'}-報名選手資料.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showNotice('success', '已成功下載報名選手資料 Excel 檔（.xlsx）！');
+    } catch (err) {
+      showNotice('error', err.message);
+    } finally {
+      setBusyAction('');
     }
   };
 
@@ -347,7 +502,7 @@ export default function AdminEventEditorPage() {
 
   const handlePushToChipSystem = async (e) => {
     e.preventDefault();
-    setSheetBusy('push');
+    setBusyAction('push');
     try {
       const res = await apiRequest(`/api/admin/events/${id}/registrations/push-to-chip`, {
         method: 'POST',
@@ -363,7 +518,7 @@ export default function AdminEventEditorPage() {
     } catch (err) {
       showNotice('error', err.message);
     } finally {
-      setSheetBusy('');
+      setBusyAction('');
     }
   };
 
@@ -397,7 +552,15 @@ export default function AdminEventEditorPage() {
 
   const publicUrl = `${window.location.origin}/register/${event.slug}`;
   const integrationApiUrl = `${window.location.origin}/api/integration/events/${event.slug}/roster?paidOnly=true`;
-  const hasUnifiedDb = Boolean(googleCreds.unifiedDbConfigured || event.sheet_sync_mode !== 'local');
+  const maxParticipants = Number(event.max_participants || 0);
+  const capacityText = `${registrations.length} / ${maxParticipants > 0 ? maxParticipants : '不限'}`;
+
+  const unpaidRegs = registrations.filter((r) => r.payment_status === '待繳費');
+  const paidRegs = registrations.filter((r) => r.payment_status === '已繳費');
+  const cancelledRegs = registrations.filter((r) => r.payment_status === '已取消');
+  const unpaidTotalAmount = unpaidRegs.reduce((acc, r) => acc + Number(r.total_amount || 0), 0);
+  const paidTotalAmount = paidRegs.reduce((acc, r) => acc + Number(r.total_amount || 0), 0);
+
   const filteredRegs = registrations.filter((r) => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return true;
@@ -414,12 +577,39 @@ export default function AdminEventEditorPage() {
     );
   });
 
+  const filteredReconcileRegs = registrations
+    .filter((r) => {
+      if (reconcileFilter === 'unpaid' && r.payment_status !== '待繳費') return false;
+      if (reconcileFilter === 'paid' && r.payment_status !== '已繳費') return false;
+      if (reconcileFilter === 'cancelled' && r.payment_status !== '已取消') return false;
+      const q = reconcileSearch.trim().toLowerCase();
+      if (!q) return true;
+      return (
+        String(r.runner_name || '').toLowerCase().includes(q) ||
+        String(r.group_name || '').toLowerCase().includes(q) ||
+        String(r.group_code || '').toLowerCase().includes(q) ||
+        String(r.remittance_last5 || '').toLowerCase().includes(q) ||
+        String(r.reg_code || '').toLowerCase().includes(q)
+      );
+    })
+    // 將尚未繳款者排在最前面，方便承辦人快速核對
+    .sort((a, b) => {
+      const rank = (s) => (s === '待繳費' ? 0 : s === '已繳費' ? 1 : 2);
+      const diff = rank(a.payment_status) - rank(b.payment_status);
+      if (diff !== 0) return diff;
+      return Number(b.id) - Number(a.id);
+    });
+
   const tabs = [
     { key: 'basic', label: '基本設定與狀態', icon: Settings },
     { key: 'banner', label: '橫幅 Banner 自訂', icon: ImageIcon },
     { key: 'form', label: `動態表單 (${event.fields?.length || 0})`, icon: ListChecks },
-    { key: 'sheets', label: '統一試算表資料庫', icon: FileSpreadsheet },
     { key: 'registrations', label: `報名名單 (${registrations.length})`, icon: Users },
+    {
+      key: 'reconcile',
+      label: `對帳管理${unpaidRegs.length > 0 ? ` (${unpaidRegs.length} 待繳)` : ''}`,
+      icon: CreditCard,
+    },
     { key: 'chip', label: '晶片系統連結', icon: Cpu },
   ];
 
@@ -439,7 +629,13 @@ export default function AdminEventEditorPage() {
               <TurLogo size="sm" />
             </div>
             <div className="min-w-0">
-              <h1 className="text-base sm:text-lg font-black text-white truncate">{event.name}</h1>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-base sm:text-lg font-black text-white truncate">{event.name}</h1>
+                <span className="inline-flex items-center gap-1 rounded-full border border-lime-400/40 bg-lime-500/15 px-2.5 py-0.5 font-mono-num text-xs font-black text-lime-300 shrink-0">
+                  <Users className="h-3 w-3" />
+                  報名人員 {capacityText}
+                </span>
+              </div>
               <p className="text-[11px] text-slate-400 font-mono-num truncate">{publicUrl}</p>
             </div>
           </div>
@@ -455,7 +651,7 @@ export default function AdminEventEditorPage() {
             </Link>
             <button
               type="button"
-              onClick={() => handleSave(false)}
+              onClick={handleSave}
               disabled={saving}
               className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 px-5 py-2 text-xs sm:text-sm font-black text-slate-950 hover:from-emerald-400 hover:to-lime-300 disabled:opacity-60 shadow-lg shadow-emerald-950/50"
             >
@@ -541,22 +737,38 @@ export default function AdminEventEditorPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1.5">活動名稱 *</label>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">活動名稱（中文） *</label>
                 <input
                   type="text"
                   value={event.name || ''}
-                  onChange={(e) => updateEventField('name', e.target.value)}
+                  onChange={(e) => handleEventChineseNameChange(e.target.value)}
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                  英文賽事名稱（對接晶片系統雙語證書）
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-bold text-slate-300">
+                    英文賽事名稱（輸入中文自動產生・可自行修改）
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEnglishManuallyEdited(false);
+                      updateEventField('english_name', generateEnglishEventName(event.name || ''));
+                    }}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-sky-400 hover:text-sky-300"
+                  >
+                    <Sparkles className="h-3 w-3" />
+                    重新自動產生
+                  </button>
+                </div>
                 <input
                   type="text"
                   value={event.english_name || ''}
-                  onChange={(e) => updateEventField('english_name', e.target.value)}
+                  onChange={(e) => {
+                    setEnglishManuallyEdited(true);
+                    updateEventField('english_name', e.target.value);
+                  }}
                   placeholder="2026 TUR TAIWAN ULTRA SPEED CHALLENGE"
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
                 />
@@ -627,7 +839,7 @@ export default function AdminEventEditorPage() {
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                  報名人數上限（填 0 代表不限制，額滿將自動轉為已結案）
+                  報名人數上限（目前報名：{capacityText}；填 0 代表不限制）
                 </label>
                 <input
                   type="number"
@@ -720,7 +932,7 @@ export default function AdminEventEditorPage() {
               <p className="text-xs font-bold uppercase tracking-wider text-lime-400 mb-2">
                 前台頂部橫幅即時預覽
               </p>
-              <BannerHero event={event} compact />
+              <BannerHero event={{ ...event, registration_count: registrations.length }} compact />
             </div>
 
             <div className="tur-control-bar rounded-2xl p-6 space-y-5">
@@ -751,21 +963,18 @@ export default function AdminEventEditorPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                  橫幅背景圖片網址（建議使用公開圖片網址以長期保存）
-                </label>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="text"
-                    value={event.banner_image_url || ''}
-                    onChange={(e) => updateEventField('banner_image_url', e.target.value)}
-                    placeholder="https://... 或上傳圖片"
-                    className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
-                  />
-                  <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-sky-500 px-4 py-2.5 text-xs font-black text-slate-950 hover:bg-sky-400 transition shrink-0">
-                    <Upload className="h-4 w-4" />
-                    <span>{uploading ? '上傳中...' : '上傳圖片檔案'}</span>
+              {/* 承辦人自行上傳喜歡照片 */}
+              <div className="rounded-xl border border-sky-500/35 bg-sky-950/20 p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-black text-sky-300">承辦人自行上傳喜歡照片或貼上圖片網址</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      支援 JPG、PNG、WebP、GIF（最大 5MB），上傳後立即套用至上方橫幅預覽。
+                    </p>
+                  </div>
+                  <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-cyan-400 px-4 py-2.5 text-xs font-black text-slate-950 hover:from-sky-400 hover:to-cyan-300 transition shrink-0">
+                    {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                    <span>{uploading ? '照片上傳中...' : '上傳喜歡的照片'}</span>
                     <input
                       type="file"
                       accept="image/jpeg,image/png,image/webp,image/gif"
@@ -775,11 +984,22 @@ export default function AdminEventEditorPage() {
                     />
                   </label>
                 </div>
+
+                <input
+                  type="text"
+                  value={event.banner_image_url || ''}
+                  onChange={(e) => updateEventField('banner_image_url', e.target.value)}
+                  placeholder="https://... 或點右上方按鈕自行上傳照片"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
+                />
               </div>
 
+              {/* 內建 10 種路跑風格精選背景（含原 4 種 + 新增 6 種） */}
               <div>
-                <p className="text-xs font-bold text-slate-400 mb-2">內建路跑風格精選背景（點擊套用）</p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <p className="text-xs font-bold text-slate-300 mb-2.5">
+                  內建路跑風格精選背景（共 {PRESET_BANNERS.length} 種・點擊套用）
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                   {PRESET_BANNERS.map((item) => (
                     <button
                       key={item.name}
@@ -791,8 +1011,8 @@ export default function AdminEventEditorPage() {
                           : 'border-slate-700 hover:border-slate-500'
                       }`}
                     >
-                      <img src={item.url} alt={item.name} className="h-20 w-full object-cover" />
-                      <p className="bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-slate-200">
+                      <img src={item.url} alt={item.name} className="h-24 w-full object-cover" />
+                      <p className="bg-slate-950 px-2.5 py-1.5 text-xs font-semibold text-slate-200 truncate">
                         {item.name}
                       </p>
                     </button>
@@ -807,7 +1027,7 @@ export default function AdminEventEditorPage() {
         {tab === 'form' && (
           <div className="space-y-4">
             <p className="text-sm text-slate-300">
-              可拖曳卡片調整欄位順序、增刪欄位、設定計價與晶片分組代碼。點擊右上角「儲存變更」後將同步更新對應 Google 試算表表頭。
+              可拖曳卡片調整欄位順序、增刪欄位、設定計價與晶片分組代碼；系統已預設「賽事加購服務」（非必選，含 3 項範例明細），您可自由新增、修改或刪除選項。修改完成後請點擊右上角「儲存變更」。
             </p>
             <FormBuilder
               fields={event.fields || []}
@@ -817,163 +1037,29 @@ export default function AdminEventEditorPage() {
           </div>
         )}
 
-        {/* ==================== TAB 4: 平台統一 Google 試算表資料庫 ==================== */}
-        {tab === 'sheets' && (
-          <div className="tur-control-bar rounded-2xl p-6 space-y-6">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-300 mb-2">
-                  <Database className="h-3.5 w-3.5" />
-                  單一統一雲端資料庫架構（免逐一建立連結）
-                </div>
-                <h2 className="text-xl font-black text-white">
-                  平台統一 Google 試算表資料庫
-                </h2>
-                <p className="text-sm text-slate-400 mt-1 leading-relaxed">
-                  比照晶片管理系統資料庫模式，進入本系統即自動指向「同一份」Google 試算表資料庫，承辦人無需為每個活動重新建立或貼上試算表連結！系統已自動為本活動建立獨立工作表分頁。
-                </p>
-              </div>
-            </div>
-
-            {/* 統一資料庫連線狀態卡 */}
-            <div
-              className={`rounded-xl border p-5 space-y-3 ${
-                googleCreds.unifiedDbConfigured
-                  ? 'border-emerald-500/40 bg-emerald-950/20'
-                  : 'border-amber-500/40 bg-amber-950/20'
-              }`}
-            >
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  {googleCreds.unifiedDbConfigured ? (
-                    <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
-                  ) : (
-                    <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0" />
-                  )}
-                  <div>
-                    <p className="text-sm font-black text-white">
-                      {googleCreds.unifiedDbConfigured
-                        ? `統一雲端資料庫已連線（${
-                            googleCreds.unifiedDbMode === 'api'
-                              ? 'Google Sheets API 模式'
-                              : 'GAS 統一試算表模式'
-                          }）`
-                        : '尚未設定平台統一雲端試算表環境變數'}
-                    </p>
-                    <p className="text-xs text-slate-300 mt-0.5">
-                      {googleCreds.unifiedDbConfigured
-                        ? '所有活動設定、報名名單、繳費狀態與配號皆即時寫入同一份雲端 Google 試算表，網路版跨裝置零遺失。'
-                        : '網路部署時，只需於 Vercel / 伺服器環境變數設定一次 GOOGLE_MASTER_SHEET_ID（搭配 Service Account）或 GOOGLE_MASTER_GAS_URL，全平台即自動整合為同一份資料庫。'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 本活動專屬分頁名稱 */}
-            <div className="rounded-xl border border-slate-700 bg-slate-950/75 p-5 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                    本活動在統一試算表中的專屬分頁名稱
-                  </label>
-                  <input
-                    type="text"
-                    value={event.sheet_tab_name || event.name || ''}
-                    onChange={(e) => updateEventField('sheet_tab_name', e.target.value)}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
-                  />
-                  <p className="mt-1.5 text-[11px] text-slate-400">
-                    修改分頁名稱或增減動態表單欄位後，請點下方「儲存並同步表頭至專屬分頁」。
-                  </p>
-                </div>
-
-                <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-xs text-slate-300 space-y-1.5">
-                  <p className="font-bold text-sky-300">各承辦人獨立權限與資料安全保護：</p>
-                  <p className="text-slate-400 leading-relaxed">
-                    所有活動資料集中於同一份雲端試算表內的不同分頁，為防止各承辦人互相改到資料，系統透過獨立帳號隔離權限，您可直接在「報名名單」分頁即時管理繳費、配號與匯出本活動專屬 CSV。
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3 pt-1">
-              <button
-                type="button"
-                onClick={handleTestSheet}
-                disabled={Boolean(sheetBusy)}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-sky-500/40 bg-sky-500/15 px-4 py-2.5 text-xs font-bold text-sky-300 hover:bg-sky-500/25 disabled:opacity-50"
-              >
-                {sheetBusy === 'test' ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <CheckCircle2 className="h-4 w-4" />
-                )}
-                <span>測試統一資料庫連線</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleSyncHeaders}
-                disabled={Boolean(sheetBusy) || !hasUnifiedDb}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-lime-500/40 bg-lime-500/15 px-4 py-2.5 text-xs font-bold text-lime-300 hover:bg-lime-500/25 disabled:opacity-40"
-              >
-                {sheetBusy === 'headers' ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4" />
-                )}
-                <span>儲存並同步表頭至專屬分頁</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handlePullFromSheet}
-                disabled={Boolean(sheetBusy) || !hasUnifiedDb}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/15 px-4 py-2.5 text-xs font-bold text-amber-300 hover:bg-amber-500/25 disabled:opacity-40"
-              >
-                <RefreshCw className={`h-4 w-4 ${sheetBusy === 'pull' ? 'animate-spin' : ''}`} />
-                <span>從專屬分頁拉取最新異動</span>
-              </button>
-
-              {googleCreds.masterSheetUrl && (
-                <a
-                  href={googleCreds.masterSheetUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-4 py-2.5 text-xs font-bold text-emerald-300 hover:bg-emerald-500/25"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  <span>開啟平台統一母試算表（總管）</span>
-                </a>
-              )}
-            </div>
-
-            {event.last_sheet_sync_at && (
-              <p className="text-xs text-slate-400">
-                最後同步時間：<span className="font-mono-num text-slate-200">{event.last_sheet_sync_at}</span>
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* ==================== TAB 5: 報名名單與配號 ==================== */}
+        {/* ==================== TAB 4: 報名名單（含修改、刪除、一鍵清空、匯出 Excel） ==================== */}
         {tab === 'registrations' && (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="搜尋序號、姓名、團體名稱、團報代碼或匯款後五碼..."
-                className="w-full sm:w-80 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-white focus:border-lime-400 focus:outline-none"
-              />
+              <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="搜尋序號、姓名、團體名稱、團報代碼或尾五碼..."
+                  className="w-full sm:w-72 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-white focus:border-lime-400 focus:outline-none"
+                />
+                <span className="inline-flex items-center gap-1.5 rounded-xl border border-lime-400/35 bg-lime-500/10 px-3 py-2 font-mono-num text-xs font-black text-lime-300">
+                  <Users className="h-3.5 w-3.5" />
+                  報名人員：{capacityText}
+                </span>
+              </div>
 
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => handleAutoAssignBibs(false)}
-                  disabled={Boolean(sheetBusy)}
+                  disabled={Boolean(busyAction)}
                   className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 px-3.5 py-2 text-xs font-black text-slate-950 hover:from-emerald-400 hover:to-lime-300 disabled:opacity-40"
                 >
                   <Hash className="h-3.5 w-3.5" />
@@ -982,31 +1068,16 @@ export default function AdminEventEditorPage() {
 
                 <button
                   type="button"
-                  onClick={() => handleExportCsv(true, false)}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2 text-xs font-bold text-emerald-300 hover:bg-emerald-500/25"
+                  onClick={handleExportExcel}
+                  disabled={Boolean(busyAction)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-400/50 bg-emerald-500/20 px-3.5 py-2 text-xs font-black text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-40"
                 >
-                  <Cpu className="h-3.5 w-3.5" />
-                  <span>匯出晶片系統專用 CSV</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handlePullFromSheet}
-                  disabled={Boolean(sheetBusy) || !hasUnifiedDb}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-sky-500/40 bg-sky-500/15 px-3.5 py-2 text-xs font-bold text-sky-300 hover:bg-sky-500/25 disabled:opacity-40"
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 ${sheetBusy === 'pull' ? 'animate-spin' : ''}`} />
-                  <span>從試算表拉取</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleRetrySync}
-                  disabled={Boolean(sheetBusy) || !hasUnifiedDb}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3.5 py-2 text-xs font-bold text-amber-300 hover:bg-amber-500/25 disabled:opacity-40"
-                >
-                  <Upload className="h-3.5 w-3.5" />
-                  <span>補送試算表</span>
+                  {busyAction === 'excel' ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <FileSpreadsheet className="h-3.5 w-3.5" />
+                  )}
+                  <span>匯出 Excel (.xlsx)</span>
                 </button>
 
                 <button
@@ -1015,7 +1086,21 @@ export default function AdminEventEditorPage() {
                   className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2 text-xs font-bold text-slate-200 hover:bg-slate-700"
                 >
                   <Download className="h-3.5 w-3.5" />
-                  <span>完整 CSV</span>
+                  <span>匯出 CSV</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleClearAllRegistrations}
+                  disabled={Boolean(busyAction) || registrations.length === 0}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-rose-500/50 bg-rose-600/20 px-3.5 py-2 text-xs font-black text-rose-300 hover:bg-rose-600/35 disabled:opacity-40"
+                >
+                  {busyAction === 'clear_all' ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+                  <span>一鍵清空名單</span>
                 </button>
               </div>
             </div>
@@ -1029,16 +1114,15 @@ export default function AdminEventEditorPage() {
                     <th className="px-4 py-3">跑者姓名 / 隱碼證號</th>
                     <th className="px-4 py-3">組別代碼</th>
                     <th className="px-4 py-3">應繳金額</th>
-                    <th className="px-4 py-3">匯款方式 / 後五碼</th>
+                    <th className="px-4 py-3">匯款方式 / 尾五碼</th>
                     <th className="px-4 py-3">繳費狀態</th>
-                    <th className="px-4 py-3">試算表同步</th>
-                    <th className="px-4 py-3 text-right">明細</th>
+                    <th className="px-4 py-3 text-right">操作</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                   {filteredRegs.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="px-4 py-10 text-center text-slate-500">
+                      <td colSpan={8} className="px-4 py-10 text-center text-slate-500">
                         查無符合條件的報名資料。
                       </td>
                     </tr>
@@ -1130,7 +1214,7 @@ export default function AdminEventEditorPage() {
                                 {reg.remittance_last5}
                               </span>
                             ) : (
-                              <span className="text-[11px] text-slate-500">未填後五碼</span>
+                              <span className="text-[11px] text-slate-500">未填尾五碼</span>
                             )}
                             {reg.group_code && reg.payment_status !== '已繳費' && (
                               <button
@@ -1162,21 +1246,33 @@ export default function AdminEventEditorPage() {
                             <option value="已取消">已取消</option>
                           </select>
                         </td>
-                        <td className="px-4 py-3">
-                          <SyncStatusBadge
-                            status={reg.sheet_sync_status}
-                            errorText={reg.sheet_sync_error}
-                          />
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedReg(reg)}
-                            className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-bold text-slate-200 hover:bg-slate-700"
-                          >
-                            <Eye className="h-3.5 w-3.5" />
-                            檢視
-                          </button>
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedReg(reg)}
+                              className="inline-flex items-center gap-1 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-bold text-slate-200 hover:bg-slate-700"
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                              檢視
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openEditRegModal(reg)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-sky-500/40 bg-sky-500/15 px-2.5 py-1.5 text-xs font-bold text-sky-300 hover:bg-sky-500/25"
+                            >
+                              <Edit3 className="h-3.5 w-3.5" />
+                              修改
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteRegistration(reg)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-rose-500/40 bg-rose-500/15 px-2.5 py-1.5 text-xs font-bold text-rose-300 hover:bg-rose-500/25"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              刪除
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -1187,7 +1283,183 @@ export default function AdminEventEditorPage() {
           </div>
         )}
 
-        {/* ==================== TAB 6: TUR 晶片計時系統連結（獨立資料庫串接） ==================== */}
+        {/* ==================== TAB 5: 對帳管理（精簡欄位 + 醒目標示尚未繳款名單） ==================== */}
+        {tab === 'reconcile' && (
+          <div className="space-y-4">
+            {/* 對帳統計總覽 */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="tur-control-bar rounded-2xl border border-rose-500/40 bg-rose-950/20 p-4">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-rose-300">
+                  <AlertCircle className="h-4 w-4" />
+                  <span>尚未繳款名單（待繳費）</span>
+                </div>
+                <p className="mt-1 font-mono-num text-2xl font-black text-rose-300">
+                  {unpaidRegs.length} 筆
+                </p>
+                <p className="mt-0.5 font-mono-num text-xs text-rose-200/80">
+                  未收金額 NT$ {unpaidTotalAmount.toLocaleString()}
+                </p>
+              </div>
+
+              <div className="tur-control-bar rounded-2xl border border-emerald-500/35 bg-emerald-950/15 p-4">
+                <p className="text-xs font-bold text-emerald-300">已完成繳費</p>
+                <p className="mt-1 font-mono-num text-2xl font-black text-emerald-300">
+                  {paidRegs.length} 筆
+                </p>
+                <p className="mt-0.5 font-mono-num text-xs text-emerald-200/80">
+                  已收金額 NT$ {paidTotalAmount.toLocaleString()}
+                </p>
+              </div>
+
+              <div className="tur-control-bar rounded-2xl p-4">
+                <p className="text-xs font-bold text-slate-400">已取消／總名單數</p>
+                <p className="mt-1 font-mono-num text-2xl font-black text-white">
+                  {cancelledRegs.length} <span className="text-sm text-slate-400">/ {registrations.length} 筆</span>
+                </p>
+                <p className="mt-0.5 font-mono-num text-xs text-lime-300">
+                  報名人員 {capacityText}
+                </p>
+              </div>
+            </div>
+
+            {/* 對帳篩選與搜尋 */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { key: 'all', label: `全部 (${registrations.length})` },
+                  { key: 'unpaid', label: `尚未繳款 (${unpaidRegs.length})`, danger: true },
+                  { key: 'paid', label: `已繳費 (${paidRegs.length})` },
+                  { key: 'cancelled', label: `已取消 (${cancelledRegs.length})` },
+                ].map((opt) => (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => setReconcileFilter(opt.key)}
+                    className={`rounded-xl border px-3.5 py-2 text-xs font-extrabold transition ${
+                      reconcileFilter === opt.key
+                        ? opt.danger
+                          ? 'border-rose-400 bg-rose-500 text-white'
+                          : 'border-lime-400 bg-lime-400 text-slate-950'
+                        : opt.danger
+                        ? 'border-rose-500/40 bg-rose-950/30 text-rose-300 hover:bg-rose-950/50'
+                        : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-500 hover:text-white'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              <input
+                type="text"
+                value={reconcileSearch}
+                onChange={(e) => setReconcileSearch(e.target.value)}
+                placeholder="快速搜尋姓名、團隊或尾五碼..."
+                className="w-full sm:w-64 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-white focus:border-lime-400 focus:outline-none"
+              />
+            </div>
+
+            {/* 精簡對帳表：僅列出 姓名(團隊)、總金額、尾五碼、繳費狀況 */}
+            <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/90">
+              <table className="w-full text-left text-xs sm:text-sm">
+                <thead className="border-b border-slate-800 bg-slate-950/85 text-xs uppercase text-slate-400">
+                  <tr>
+                    <th className="px-5 py-3.5">姓名（團隊）</th>
+                    <th className="px-5 py-3.5">總金額</th>
+                    <th className="px-5 py-3.5">尾五碼</th>
+                    <th className="px-5 py-3.5 text-right">繳費狀況</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {filteredReconcileRegs.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-5 py-10 text-center text-slate-500">
+                        此篩選條件下沒有符合的對帳資料。
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredReconcileRegs.map((reg) => {
+                      const isUnpaid = reg.payment_status === '待繳費';
+                      return (
+                        <tr
+                          key={reg.id}
+                          className={
+                            isUnpaid
+                              ? 'bg-rose-950/25 hover:bg-rose-950/35 border-l-4 border-l-rose-500'
+                              : 'hover:bg-slate-800/40'
+                          }
+                        >
+                          <td className="px-5 py-3.5">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-bold text-white text-sm">
+                                {reg.runner_name || '—'}
+                              </span>
+                              {reg.group_name && (
+                                <span className="rounded-md border border-purple-400/40 bg-purple-500/20 px-2 py-0.5 text-[11px] font-bold text-purple-200">
+                                  {reg.group_name}
+                                </span>
+                              )}
+                              {isUnpaid && (
+                                <span className="inline-flex items-center gap-1 rounded-full border border-rose-400/50 bg-rose-500/20 px-2 py-0.5 text-[11px] font-black text-rose-300">
+                                  <AlertCircle className="h-3 w-3" />
+                                  尚未繳款
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-5 py-3.5 font-mono-num font-black text-amber-300 whitespace-nowrap">
+                            NT$ {Number(reg.total_amount || 0).toLocaleString()}
+                          </td>
+                          <td className="px-5 py-3.5 font-mono-num whitespace-nowrap">
+                            {reg.remittance_last5 ? (
+                              <span className="inline-block rounded-lg border border-sky-500/40 bg-sky-500/15 px-2.5 py-1 text-sm font-black tracking-wider text-sky-300">
+                                {reg.remittance_last5}
+                              </span>
+                            ) : (
+                              <span className="text-xs font-bold text-rose-400">未填尾五碼</span>
+                            )}
+                          </td>
+                          <td className="px-5 py-3.5 text-right whitespace-nowrap">
+                            <div className="inline-flex items-center gap-2">
+                              {reg.group_code && isUnpaid && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleGroupPaymentStatus(reg.group_code, reg.group_name, '已繳費')
+                                  }
+                                  className="rounded-lg border border-emerald-400/40 bg-emerald-500/15 px-2.5 py-1.5 text-[11px] font-bold text-emerald-300 hover:bg-emerald-500/25"
+                                >
+                                  整團設已繳費
+                                </button>
+                              )}
+                              <select
+                                value={reg.payment_status}
+                                onChange={(e) => handlePaymentStatusChange(reg.id, e.target.value)}
+                                className={`rounded-lg border px-3 py-1.5 text-xs font-black focus:outline-none ${
+                                  reg.payment_status === '已繳費'
+                                    ? 'border-emerald-500/50 bg-emerald-950/70 text-emerald-300'
+                                    : reg.payment_status === '已取消'
+                                    ? 'border-slate-600 bg-slate-800 text-slate-300'
+                                    : 'border-rose-500/60 bg-rose-950/70 text-rose-200'
+                                }`}
+                              >
+                                <option value="待繳費">待繳費</option>
+                                <option value="已繳費">已繳費</option>
+                                <option value="已取消">已取消</option>
+                              </select>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ==================== TAB 6: TUR 晶片計時系統連結 ==================== */}
         {tab === 'chip' && (
           <div className="space-y-6">
             {/* 架構說明卡 */}
@@ -1217,34 +1489,41 @@ export default function AdminEventEditorPage() {
                 </a>
               </div>
 
-              {/* 晶片對應基本參數 */}
+              {/* 晶片對應基本參數：活動代碼與前台網址唯讀不可修改；GAS 保留以後運用 */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t border-slate-800">
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                    晶片系統對應活動代碼 (eventId)
+                  <label className="flex items-center gap-1.5 text-xs font-bold text-slate-300 mb-1.5">
+                    <Lock className="h-3.5 w-3.5 text-slate-400" />
+                    <span>晶片系統對應活動代碼 (eventId)</span>
+                    <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">
+                      唯讀
+                    </span>
                   </label>
                   <input
                     type="text"
-                    value={event.timing_event_id || ''}
-                    onChange={(e) => updateEventField('timing_event_id', e.target.value)}
-                    placeholder="例如：TUR-2026-SPEED"
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 font-mono-num text-sm text-lime-300 focus:border-lime-400 focus:outline-none"
+                    readOnly
+                    value={event.timing_event_id || event.slug || ''}
+                    className="w-full cursor-not-allowed rounded-xl border border-slate-800 bg-slate-900/70 px-3.5 py-2.5 font-mono-num text-sm text-lime-300/90 focus:outline-none"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                    TUR 晶片計時平台前台網址
+                  <label className="flex items-center gap-1.5 text-xs font-bold text-slate-300 mb-1.5">
+                    <Lock className="h-3.5 w-3.5 text-slate-400" />
+                    <span>TUR 晶片計時平台前台網址</span>
+                    <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">
+                      唯讀
+                    </span>
                   </label>
                   <input
                     type="url"
+                    readOnly
                     value={event.timing_portal_url || 'https://runchip-timing.vercel.app/'}
-                    onChange={(e) => updateEventField('timing_portal_url', e.target.value)}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 font-mono-num text-xs text-white focus:border-lime-400 focus:outline-none"
+                    className="w-full cursor-not-allowed rounded-xl border border-slate-800 bg-slate-900/70 px-3.5 py-2.5 font-mono-num text-xs text-slate-300 focus:outline-none"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                    晶片系統 GAS 同步網址（未來一鍵推送用・選填）
+                    晶片系統 GAS 同步網址（保留以後運用・選填）
                   </label>
                   <input
                     type="url"
@@ -1283,7 +1562,7 @@ export default function AdminEventEditorPage() {
                   <button
                     type="button"
                     onClick={() => handleAutoAssignBibs(chipPaidOnly)}
-                    disabled={Boolean(sheetBusy)}
+                    disabled={Boolean(busyAction)}
                     className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-lime-400/40 bg-lime-500/15 px-4 py-2.5 text-xs font-bold text-lime-300 hover:bg-lime-500/25"
                   >
                     <Hash className="h-4 w-4" />
@@ -1332,10 +1611,10 @@ export default function AdminEventEditorPage() {
 
                 <button
                   type="submit"
-                  disabled={Boolean(sheetBusy) || !event.timing_gas_url}
+                  disabled={Boolean(busyAction) || !event.timing_gas_url}
                   className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-sky-500 to-cyan-400 px-4 py-2.5 text-xs font-black text-slate-950 hover:from-sky-400 hover:to-cyan-300 disabled:opacity-40"
                 >
-                  {sheetBusy === 'push' ? (
+                  {busyAction === 'push' ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <Send className="h-4 w-4" />
@@ -1442,7 +1721,7 @@ export default function AdminEventEditorPage() {
         )}
       </main>
 
-      {/* 報名詳細內容彈窗 */}
+      {/* 報名詳細內容彈窗（檢視） */}
       {selectedReg && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
           <div className="tur-control-bar max-h-[85vh] w-full max-w-xl overflow-y-auto rounded-2xl shadow-2xl">
@@ -1470,13 +1749,6 @@ export default function AdminEventEditorPage() {
             </div>
 
             <div className="p-6 space-y-4 text-sm">
-              {selectedReg.sheet_sync_error && (
-                <div className="rounded-xl border border-rose-500/40 bg-rose-950/40 p-3 text-xs text-rose-200">
-                  <strong>試算表同步錯誤原因：</strong>
-                  {selectedReg.sheet_sync_error}
-                </div>
-              )}
-
               <div className="rounded-xl border border-slate-800 bg-slate-950 divide-y divide-slate-800">
                 {(event.fields || [])
                   .filter((f) => f.type !== 'calculated')
@@ -1499,7 +1771,215 @@ export default function AdminEventEditorPage() {
                   NT$ {Number(selectedReg.total_amount || 0).toLocaleString()}
                 </span>
               </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = selectedReg;
+                    setSelectedReg(null);
+                    openEditRegModal(target);
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-sky-500 px-4 py-2 text-xs font-black text-slate-950 hover:bg-sky-400"
+                >
+                  <Edit3 className="h-3.5 w-3.5" />
+                  修改此筆資料
+                </button>
+              </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 承辦人修改報名者所有資料彈窗 */}
+      {editingReg && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-sm">
+          <div className="tur-control-bar max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-800 bg-slate-900 px-6 py-4">
+              <div>
+                <h3 className="text-lg font-black text-white">
+                  修改報名者資料（<span className="font-mono-num text-sky-300">{editingReg.reg_code}</span>）
+                </h3>
+                <p className="text-xs text-slate-400">承辦人可在此直接調整報名者所有欄位、組別、配號與帳務狀態</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingReg(null)}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveRegistrationEdit} className="p-6 space-y-5">
+              {/* 系統管理欄位 */}
+              <div className="rounded-xl border border-slate-800 bg-slate-950/75 p-4 space-y-3">
+                <p className="text-xs font-black text-sky-300">配號、團體與帳務設定</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-1">參賽編號 (Bib)</label>
+                    <input
+                      type="text"
+                      value={editRegMeta.bib_number}
+                      onChange={(e) =>
+                        setEditRegMeta({ ...editRegMeta, bib_number: e.target.value.toUpperCase() })
+                      }
+                      placeholder="例：A001"
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 font-mono-num text-xs font-bold text-lime-300 focus:border-lime-400 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-1">繳費狀況</label>
+                    <select
+                      value={editRegMeta.payment_status}
+                      onChange={(e) =>
+                        setEditRegMeta({ ...editRegMeta, payment_status: e.target.value })
+                      }
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-bold text-white focus:border-lime-400 focus:outline-none"
+                    >
+                      <option value="待繳費">待繳費</option>
+                      <option value="已繳費">已繳費</option>
+                      <option value="已取消">已取消</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-1">匯款尾五碼</label>
+                    <input
+                      type="text"
+                      maxLength={5}
+                      value={editRegMeta.remittance_last5}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setEditRegMeta({ ...editRegMeta, remittance_last5: val });
+                        setEditRegAnswers((prev) => ({ ...prev, remittance_last5: val }));
+                      }}
+                      placeholder="5 位數字"
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 font-mono-num text-xs text-sky-300 focus:border-lime-400 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-1">報名類型</label>
+                    <select
+                      value={editRegMeta.reg_type}
+                      onChange={(e) => setEditRegMeta({ ...editRegMeta, reg_type: e.target.value })}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white focus:border-lime-400 focus:outline-none"
+                    >
+                      <option value="individual">個人報名</option>
+                      <option value="group">團體報名</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-1">匯款方式</label>
+                    <select
+                      value={editRegMeta.payment_mode}
+                      onChange={(e) =>
+                        setEditRegMeta({ ...editRegMeta, payment_mode: e.target.value })
+                      }
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white focus:border-lime-400 focus:outline-none"
+                    >
+                      <option value="individual">個別匯款</option>
+                      <option value="group">團體匯款</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-1">團體名稱</label>
+                    <input
+                      type="text"
+                      value={editRegMeta.group_name}
+                      onChange={(e) =>
+                        setEditRegMeta({ ...editRegMeta, group_name: e.target.value })
+                      }
+                      placeholder="選填"
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white focus:border-lime-400 focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 動態報名欄位（全部可編修） */}
+              <div className="space-y-4">
+                <p className="text-xs font-black text-lime-300">報名表所有欄位資料</p>
+                {(event.fields || [])
+                  .filter((f) => f.type !== 'calculated')
+                  .map((field) => (
+                    <DynamicFormField
+                      key={field.id}
+                      field={field}
+                      value={editRegAnswers[field.id]}
+                      onChange={handleEditRegFieldChange}
+                      pricing={editRegPricing}
+                      namePrefix="admin_edit_reg"
+                    />
+                  ))}
+              </div>
+
+              {/* 總金額自動試算 / 手動調整 */}
+              <div className="rounded-xl border border-amber-400/35 bg-amber-500/10 p-4 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-amber-300 text-xs font-bold">
+                    <Calculator className="h-4 w-4" />
+                    <span>依欄位自動試算金額：NT$ {editRegPricing.total.toLocaleString()}</span>
+                  </div>
+                  <label className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editRegMeta.manualAmount}
+                      onChange={(e) =>
+                        setEditRegMeta({
+                          ...editRegMeta,
+                          manualAmount: e.target.checked,
+                          total_amount: e.target.checked ? editRegMeta.total_amount : editRegPricing.total,
+                        })
+                      }
+                      className="accent-amber-400"
+                    />
+                    <span>手動指定應繳總金額</span>
+                  </label>
+                </div>
+                {editRegMeta.manualAmount && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-300">指定總金額 NT$</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={editRegMeta.total_amount}
+                      onChange={(e) =>
+                        setEditRegMeta({
+                          ...editRegMeta,
+                          total_amount: Number(e.target.value || 0),
+                        })
+                      }
+                      className="w-36 rounded-lg border border-amber-400/50 bg-slate-950 px-3 py-1.5 font-mono-num text-sm font-black text-amber-300 focus:outline-none"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingReg(null)}
+                  className="rounded-xl border border-slate-700 px-4 py-2.5 text-xs font-bold text-slate-300 hover:bg-slate-800"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingRegEdit}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 px-5 py-2.5 text-xs sm:text-sm font-black text-slate-950 hover:from-emerald-400 hover:to-lime-300 disabled:opacity-60"
+                >
+                  {savingRegEdit ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4" />
+                  )}
+                  <span>{savingRegEdit ? '儲存中...' : '儲存修改資料'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

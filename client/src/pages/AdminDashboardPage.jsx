@@ -28,6 +28,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { apiRequest, getAdminToken, setAdminToken } from '../api/client';
+import { generateEnglishEventName } from '../utils/raceNameTranslator';
 import TurHeader from '../components/TurHeader';
 import TurFooter from '../components/TurFooter';
 
@@ -80,6 +81,7 @@ export default function AdminDashboardPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newForm, setNewForm] = useState(INITIAL_FORM);
+  const [englishManuallyEdited, setEnglishManuallyEdited] = useState(false);
 
   // 最高權限承辦人：帳號與權限管理狀態
   const [users, setUsers] = useState([]);
@@ -200,6 +202,7 @@ export default function AdminDashboardPage() {
       });
       setShowCreate(false);
       setNewForm(INITIAL_FORM());
+      setEnglishManuallyEdited(false);
       navigate(`/admin/events/${res.event.id}`);
     } catch (err) {
       showToast(err.message);
@@ -396,7 +399,7 @@ export default function AdminDashboardPage() {
 
   const totalRunners = events.reduce((acc, ev) => acc + Number(ev.registration_count || 0), 0);
   const totalRevenue = events.reduce((acc, ev) => acc + Number(ev.total_revenue || 0), 0);
-  const totalSyncErrors = events.reduce((acc, ev) => acc + Number(ev.sync_error_count || 0), 0);
+  const totalUnpaid = events.reduce((acc, ev) => acc + Number(ev.unpaid_count || 0), 0);
   const openCount = events.filter((e) => e.regState?.status === 'open').length;
   const preparingCount = events.filter((e) => e.regState?.status === 'preparing').length;
   const closedCount = events.filter((e) => e.regState?.status === 'closed').length;
@@ -414,12 +417,19 @@ export default function AdminDashboardPage() {
   const renderCreateForm = (isInline = false) => (
     <form onSubmit={handleCreateEvent} className={isInline ? 'space-y-4' : 'p-6 space-y-4'}>
       <div>
-        <label className="block text-xs font-bold text-slate-300 mb-1">活動名稱 *</label>
+        <label className="block text-xs font-bold text-slate-300 mb-1">活動名稱（中文） *</label>
         <input
           type="text"
           required
           value={newForm.name}
-          onChange={(e) => setNewForm({ ...newForm, name: e.target.value })}
+          onChange={(e) => {
+            const nextName = e.target.value;
+            setNewForm((prev) => ({
+              ...prev,
+              name: nextName,
+              english_name: englishManuallyEdited ? prev.english_name : generateEnglishEventName(nextName),
+            }));
+          }}
           placeholder="例如：2026 台灣城市超級馬拉松"
           className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
         />
@@ -501,12 +511,30 @@ export default function AdminDashboardPage() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs font-bold text-slate-300 mb-1">英文賽事名稱（選填）</label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-xs font-bold text-slate-300">英文賽事名稱（自動產生・可修改）</label>
+            <button
+              type="button"
+              onClick={() => {
+                setEnglishManuallyEdited(false);
+                setNewForm((prev) => ({
+                  ...prev,
+                  english_name: generateEnglishEventName(prev.name),
+                }));
+              }}
+              className="text-[11px] font-bold text-sky-400 hover:text-sky-300"
+            >
+              重新產生
+            </button>
+          </div>
           <input
             type="text"
             value={newForm.english_name}
-            onChange={(e) => setNewForm({ ...newForm, english_name: e.target.value })}
-            placeholder="例如：2026 TAIWAN ULTRA MARATHON"
+            onChange={(e) => {
+              setEnglishManuallyEdited(true);
+              setNewForm({ ...newForm, english_name: e.target.value });
+            }}
+            placeholder="輸入中文活動名稱後自動產生，亦可手動修改"
             className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-lime-400 focus:outline-none"
           />
         </div>
@@ -552,14 +580,29 @@ export default function AdminDashboardPage() {
         showHomeLink
         homeLabel="前台"
         rightSlot={
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-300 hover:border-rose-500 hover:text-rose-400 transition"
-          >
-            <LogOut className="h-3.5 w-3.5" />
-            <span>登出</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {!isSuperAdmin && (
+              <button
+                type="button"
+                onClick={() => {
+                  setAdminToken('');
+                  navigate('/admin/login?mode=super_admin');
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3 py-1.5 text-xs font-extrabold text-amber-300 hover:bg-amber-500/25 transition"
+              >
+                <Crown className="h-3.5 w-3.5" />
+                <span>最高管理權限</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-300 hover:border-rose-500 hover:text-rose-400 transition"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              <span>登出</span>
+            </button>
+          </div>
         }
       />
 
@@ -767,7 +810,7 @@ export default function AdminDashboardPage() {
                 className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 px-4 py-2 text-xs sm:text-sm font-black text-slate-950 hover:from-amber-400 hover:to-yellow-300"
               >
                 <UserPlus className="h-4 w-4" />
-                <span>新增承辦人</span>
+                <span>註冊新承辦人</span>
               </button>
             </div>
 
@@ -902,18 +945,17 @@ export default function AdminDashboardPage() {
               </div>
 
               <div className="tur-control-bar rounded-2xl p-4">
-                <p className="text-xs text-slate-400">雲端試算表</p>
-                <p className="mt-1.5 text-sm font-black text-white flex items-center gap-1.5">
-                  <Database
-                    className={`h-4 w-4 ${
-                      googleCreds.unifiedDbConfigured ? 'text-emerald-400' : 'text-amber-400'
-                    }`}
-                  />
-                  <span>{googleCreds.unifiedDbConfigured ? '已連線' : '未設定'}</span>
+                <p className="text-xs text-slate-400">尚未繳款（待對帳）</p>
+                <p
+                  className={`mt-1 font-mono-num text-2xl font-black ${
+                    totalUnpaid > 0 ? 'text-rose-400' : 'text-emerald-400'
+                  }`}
+                >
+                  {totalUnpaid} 筆
                 </p>
-                {totalSyncErrors > 0 && (
-                  <p className="mt-1 text-xs text-rose-400">待補送 {totalSyncErrors} 筆</p>
-                )}
+                <p className="mt-1 text-[11px] text-slate-400">
+                  {totalUnpaid > 0 ? '請至各活動「對帳管理」核對' : '目前皆已完成對帳'}
+                </p>
               </div>
             </div>
 
@@ -926,6 +968,7 @@ export default function AdminDashboardPage() {
                 type="button"
                 onClick={() => {
                   setNewForm(INITIAL_FORM());
+                  setEnglishManuallyEdited(false);
                   setShowCreate(true);
                 }}
                 className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 px-4 py-2 text-xs sm:text-sm font-black text-slate-950 hover:from-emerald-400 hover:to-lime-300 transition"
@@ -1036,13 +1079,9 @@ export default function AdminDashboardPage() {
                                   承辦：{ev.owner_display_name || ev.owner_username} (@{ev.owner_username})
                                 </span>
                               )}
-                              <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 border border-slate-700 px-2.5 py-0.5 text-[11px] font-semibold text-slate-300">
-                                <Database className="h-3 w-3 text-sky-400" />
-                                分頁：{ev.sheet_tab_name || ev.name}
-                              </span>
-                              {ev.sync_error_count > 0 && (
+                              {ev.unpaid_count > 0 && (
                                 <span className="rounded-full bg-rose-500/20 border border-rose-500/40 px-2.5 py-0.5 text-[11px] font-bold text-rose-300">
-                                  {ev.sync_error_count} 筆同步異常
+                                  尚未繳款 {ev.unpaid_count} 筆
                                 </span>
                               )}
                             </div>
@@ -1058,10 +1097,10 @@ export default function AdminDashboardPage() {
                                 <Clock className="h-3.5 w-3.5 text-sky-400" />
                                 報名期間：{formatDt(ev.reg_start_at)} ~ {formatDt(ev.reg_end_at)}
                               </span>
-                              <span className="flex items-center gap-1">
+                              <span className="flex items-center gap-1 font-mono-num font-bold text-lime-300">
                                 <Users className="h-3.5 w-3.5 text-emerald-400" />
-                                已報名：{ev.registration_count}
-                                {ev.max_participants > 0 ? ` / ${ev.max_participants} 人` : ' 人'}
+                                報名人員：{ev.registration_count} /{' '}
+                                {ev.max_participants > 0 ? ev.max_participants : '不限'}
                               </span>
                               <span className="font-mono-num text-amber-300 font-bold">
                                 累計 NT$ {Number(ev.total_revenue || 0).toLocaleString()}
@@ -1168,7 +1207,7 @@ export default function AdminDashboardPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
           <div className="tur-control-bar w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
-              <h2 className="text-lg font-black text-white">新增承辦人帳號</h2>
+              <h2 className="text-lg font-black text-white">註冊新承辦人帳號</h2>
               <button
                 type="button"
                 onClick={() => setShowCreateUser(false)}

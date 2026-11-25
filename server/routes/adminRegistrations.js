@@ -6,6 +6,7 @@ const {
   appendRegistrationToSheet,
   pullRowsFromSheet,
   updatePaymentStatusInSheet,
+  updateRegistrationInSheet,
   updateBibInSheet,
   buildExpectedHeaders,
 } = require('../services/googleSheets');
@@ -16,12 +17,14 @@ const {
 } = require('../services/cloudStore');
 const { sendRegistrationEmail } = require('../services/emailService');
 const { extractRunnerSummary } = require('../services/validation');
+const { buildExcelWorkbookBuffer } = require('../services/excelExport');
 const {
   maskIdNumber,
   buildChipImportCsv,
   autoAssignBibNumbers,
   pushRosterToChipSystem,
   toChipTimingRegistration,
+  resolveCategoryMeta,
 } = require('../services/chipBridge');
 
 const router = express.Router();
@@ -71,6 +74,249 @@ router.get('/events/:eventId/registrations', (req, res) => {
   return res.json({
     registrations: rows.map(formatRegistrationRow),
     total: rows.length,
+  });
+});
+
+/**
+ * 承辦人修改報名資料時，依據動態欄位計算費用明細與總額（允許承辦人不受一般前台年齡/格式強制攔截，彈性協助選手修正）
+ */
+function calculateAdminPricing(fields, answers) {
+  const breakdown = [];
+  let total = 0;
+
+  for (const field of fields || []) {
+    if (field.type === 'calculated') continue;
+    const val = answers?.[field.id];
+    if (field.type === 'select' || field.type === 'radio') {
+      const opt = (field.options || []).find((o) => String(o.value) === String(val));
+      const price = Number(opt?.price || 0);
+      if (opt && price > 0) {
+        total += price;
+        breakdown.push({
+          fieldId: field.id,
+          fieldLabel: field.label,
+          itemLabel: opt.label || opt.value,
+          amount: price,
+        });
+      }
+    } else if (field.type === 'checkbox') {
+      const selected = Array.isArray(val) ? val : [];
+      for (const s of selected) {
+        const opt = (field.options || []).find((o) => String(o.value) === String(s));
+        const price = Number(opt?.price || 0);
+        if (opt && price > 0) {
+          total += price;
+          breakdown.push({
+            fieldId: field.id,
+            fieldLabel: field.label,
+            itemLabel: opt.label || opt.value,
+            amount: price,
+          });
+        }
+      }
+    } else if (field.type === 'number') {
+      const num = Number(val || 0);
+      const unitPrice = Number(field.unitPrice || 0);
+      if (!Number.isNaN(num) && num > 0 && unitPrice > 0) {
+        const subtotal = Math.round(num * unitPrice);
+        total += subtotal;
+        breakdown.push({
+          fieldId: field.id,
+          fieldLabel: field.label,
+          itemLabel: `${num} × NT$${unitPrice.toLocaleString()}`,
+          amount: subtotal,
+        });
+      }
+    }
+  }
+  return { total, breakdown };
+}
+
+// PUT /api/admin/registrations/:id — 承辦人修改報名者所有資料（動態欄位、組別、配號、團報、匯款與繳費狀態）
+router.put('/registrations/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM registrations WHERE id = ?').get(id);
+  if (!existing) {
+    return res.status(404).json({ error: '找不到該筆報名紀錄。' });
+  }
+
+  const event = getOwnedEventOrDeny(req, res, existing.event_id);
+  if (!event) return;
+
+  const body = req.body || {};
+  const fields = JSON.parse(event.fields_json || '[]');
+  const existingAnswers = JSON.parse(existing.answers_json || '{}');
+  const rawAnswers = body.answers && typeof body.answers === 'object' ? body.answers : existingAnswers;
+
+  // 正規化答案
+  const cleanAnswers = { ...existingAnswers };
+  for (const field of fields) {
+    if (field.type === 'calculated') continue;
+    if (rawAnswers[field.id] === undefined) continue;
+    const rawVal = rawAnswers[field.id];
+    if (field.type === 'checkbox') {
+      cleanAnswers[field.id] = Array.isArray(rawVal)
+        ? rawVal.map((v) => String(v).trim()).filter(Boolean)
+        : [];
+    } else if (field.type === 'tw_id' || field.validation === 'tw_id_or_passport') {
+      cleanAnswers[field.id] = String(rawVal ?? '').trim().toUpperCase();
+    } else if (field.type === 'number') {
+      cleanAnswers[field.id] = rawVal === '' || rawVal === null ? '' : Number(rawVal);
+    } else {
+      cleanAnswers[field.id] = String(rawVal ?? '').trim();
+    }
+  }
+  // 保留其他自訂鍵值
+  for (const [k, v] of Object.entries(rawAnswers)) {
+    if (cleanAnswers[k] === undefined) {
+      cleanAnswers[k] = v;
+    }
+  }
+
+  const summary = extractRunnerSummary(fields, cleanAnswers);
+  const catMeta = resolveCategoryMeta(fields, cleanAnswers);
+  const pricing = calculateAdminPricing(fields, cleanAnswers);
+
+  const nextBib =
+    body.bib_number !== undefined
+      ? String(body.bib_number || '').trim().toUpperCase()
+      : existing.bib_number || '';
+
+  if (nextBib) {
+    const dupBib = db
+      .prepare('SELECT id, runner_name FROM registrations WHERE event_id = ? AND bib_number = ? AND id != ?')
+      .get(existing.event_id, nextBib, id);
+    if (dupBib) {
+      return res.status(409).json({
+        error: `參賽編號「${nextBib}」已分配給 ${dupBib.runner_name}，請使用其他編號。`,
+      });
+    }
+  }
+
+  const nextPaymentStatus = ['待繳費', '已繳費', '已取消'].includes(body.payment_status)
+    ? body.payment_status
+    : existing.payment_status;
+  const nextRegType = body.reg_type === 'group' ? 'group' : body.reg_type === 'individual' ? 'individual' : existing.reg_type || 'individual';
+  const nextPaymentMode =
+    body.payment_mode === 'group'
+      ? 'group'
+      : body.payment_mode === 'individual'
+      ? 'individual'
+      : existing.payment_mode || 'individual';
+  const nextGroupName =
+    body.group_name !== undefined ? String(body.group_name || '').trim() : existing.group_name || '';
+  const nextGroupCode =
+    body.group_code !== undefined ? String(body.group_code || '').trim().toUpperCase() : existing.group_code || '';
+  const nextRemittanceLast5 =
+    body.remittance_last5 !== undefined
+      ? String(body.remittance_last5 || '').trim()
+      : summary.remittanceLast5 || existing.remittance_last5 || '';
+
+  // 確保動態答案裡的匯款帳號尾五碼與主欄一致
+  if (fields.some((f) => f.id === 'remittance_last5')) {
+    cleanAnswers.remittance_last5 = nextRemittanceLast5;
+  }
+
+  const nextCategoryCode =
+    body.category_code !== undefined && String(body.category_code).trim() !== ''
+      ? String(body.category_code).trim()
+      : catMeta.categoryCode || existing.category_code || '';
+
+  const nextTotalAmount =
+    body.total_amount !== undefined && body.total_amount !== '' && Number.isFinite(Number(body.total_amount))
+      ? Math.max(0, Math.round(Number(body.total_amount)))
+      : pricing.total;
+
+  db.prepare(`
+    UPDATE registrations SET
+      bib_number = ?,
+      category_code = ?,
+      runner_name = ?,
+      runner_id_number = ?,
+      runner_email = ?,
+      runner_phone = ?,
+      remittance_last5 = ?,
+      reg_type = ?,
+      group_name = ?,
+      group_code = ?,
+      payment_mode = ?,
+      answers_json = ?,
+      price_breakdown_json = ?,
+      total_amount = ?,
+      payment_status = ?
+    WHERE id = ?
+  `).run(
+    nextBib,
+    nextCategoryCode,
+    summary.runnerName || existing.runner_name || '',
+    summary.runnerIdNumber || existing.runner_id_number || '',
+    summary.runnerEmail || existing.runner_email || '',
+    summary.runnerPhone || existing.runner_phone || '',
+    nextRemittanceLast5,
+    nextRegType,
+    nextGroupName,
+    nextGroupCode,
+    nextPaymentMode,
+    JSON.stringify(cleanAnswers),
+    JSON.stringify(pricing.breakdown),
+    nextTotalAmount,
+    nextPaymentStatus,
+    id
+  );
+
+  const updated = db.prepare('SELECT * FROM registrations WHERE id = ?').get(id);
+  await syncRegistrationToCloud(updated);
+
+  const master = getMasterDatabaseConfig();
+  if (master.configured || event.sheet_sync_mode !== 'local') {
+    await updateRegistrationInSheet(event, fields, updated).catch(() => {});
+  }
+
+  return res.json({
+    registration: formatRegistrationRow(updated),
+    message: `已更新「${updated.runner_name || updated.reg_code}」的報名資料！`,
+  });
+});
+
+// DELETE /api/admin/registrations/:id — 承辦人刪除單筆報名資料
+router.delete('/registrations/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM registrations WHERE id = ?').get(id);
+  if (!existing) {
+    return res.status(404).json({ error: '找不到該筆報名紀錄。' });
+  }
+
+  const event = getOwnedEventOrDeny(req, res, existing.event_id);
+  if (!event) return;
+
+  db.prepare('DELETE FROM registrations WHERE id = ?').run(id);
+  await syncAllRegistrationsToCloud();
+
+  return res.json({
+    deletedId: id,
+    message: `已刪除「${existing.runner_name || existing.reg_code}（${existing.reg_code}）」的報名資料。`,
+  });
+});
+
+// DELETE /api/admin/events/:eventId/registrations — 一鍵清空本活動所有報名名單
+router.delete('/events/:eventId/registrations', async (req, res) => {
+  const event = getOwnedEventOrDeny(req, res, req.params.eventId);
+  if (!event) return;
+
+  const countRow = db
+    .prepare('SELECT COUNT(*) as cnt FROM registrations WHERE event_id = ?')
+    .get(event.id);
+  const deletedCount = countRow?.cnt || 0;
+
+  db.prepare('DELETE FROM registrations WHERE event_id = ?').run(event.id);
+  await syncAllRegistrationsToCloud();
+
+  return res.json({
+    deletedCount,
+    message:
+      deletedCount > 0
+        ? `已一鍵清空本活動共 ${deletedCount} 筆報名名單。`
+        : '本活動目前沒有任何報名名單。',
   });
 });
 
@@ -384,6 +630,57 @@ router.get('/events/:eventId/registrations/export-csv', (req, res) => {
     `attachment; filename*=UTF-8''${encodeURIComponent(`${event.name}-報名名單.csv`)}`
   );
   return res.send(csvContent);
+});
+
+// GET /api/admin/events/:eventId/registrations/export-excel — 匯出報名選手資料 Excel (.xlsx)
+router.get('/events/:eventId/registrations/export-excel', (req, res) => {
+  const event = getOwnedEventOrDeny(req, res, req.params.eventId);
+  if (!event) return;
+
+  const fields = JSON.parse(event.fields_json || '[]');
+  const headers = buildExpectedHeaders(fields);
+  const rows = db
+    .prepare('SELECT * FROM registrations WHERE event_id = ? ORDER BY id ASC')
+    .all(event.id);
+
+  const dataRows = rows.map((reg) => {
+    const answers = JSON.parse(reg.answers_json || '{}');
+    const rowMap = {
+      '報名序號': reg.reg_code,
+      '報名類型': reg.reg_type === 'group' ? '團體報名' : '個人報名',
+      '團體名稱': reg.group_name || '',
+      '團報代碼': reg.group_code || '',
+      '參賽編號': reg.bib_number || '',
+      '分組代碼': reg.category_code || '',
+      '報名時間': reg.created_at,
+      '應繳總金額': Number(reg.total_amount || 0),
+      '匯款方式': reg.payment_mode === 'group' ? '團體匯款' : '個別匯款',
+      '匯款後五碼': reg.remittance_last5 || '',
+      '繳費狀態': reg.payment_status,
+    };
+    for (const f of fields) {
+      if (f.type === 'calculated') continue;
+      const val = answers[f.id];
+      rowMap[String(f.label || f.id).trim()] = Array.isArray(val) ? val.join('、') : val ?? '';
+    }
+    return headers.map((h) => (rowMap[h] !== undefined ? rowMap[h] : ''));
+  });
+
+  const buffer = buildExcelWorkbookBuffer({
+    sheetName: event.name || '報名選手資料',
+    headers,
+    rows: dataRows,
+  });
+
+  res.setHeader(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  );
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename*=UTF-8''${encodeURIComponent(`${event.name}-報名選手資料.xlsx`)}`
+  );
+  return res.send(buffer);
 });
 
 // PATCH /api/admin/registrations/:id/bib — 手動修改參賽編號（號碼布）與晶片分組代碼

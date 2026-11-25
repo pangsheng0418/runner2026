@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronUp,
   Tag,
+  Users,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import TurHeader from '../components/TurHeader';
@@ -326,6 +327,13 @@ export default function HomePage() {
                                   <span>截止 {formatDtShort(ev.reg_end_at)}</span>
                                 </span>
                               )}
+                              <span className="inline-flex items-center gap-1 rounded-md border border-lime-400/30 bg-lime-500/10 px-2 py-0.5 font-mono-num font-bold text-lime-300">
+                                <Users className="h-3 w-3 shrink-0" />
+                                <span>
+                                  報名 {Number(ev.registration_count || 0)} /{' '}
+                                  {Number(ev.max_participants || 0) > 0 ? ev.max_participants : '不限'}
+                                </span>
+                              </span>
                               {categories.length > 0 && (
                                 <span className="inline-flex items-center gap-1 text-lime-300/90">
                                   <Tag className="h-3 w-3 shrink-0" />

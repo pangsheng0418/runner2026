@@ -118,7 +118,7 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
       <div className="rounded-xl border border-sky-500/30 bg-sky-950/20 p-4">
         <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-sky-300 mb-2">
           <Table2 className="h-4 w-4" />
-          <span>Google 試算表第一列（表頭）即時預覽 — 含參賽編號與晶片分組代碼</span>
+          <span>報名表與匯出 Excel 欄位即時預覽 — 含參賽編號與晶片分組代碼</span>
         </div>
         <div className="flex flex-wrap gap-1.5">
           {previewHeaders.map((h, i) => (
@@ -229,7 +229,7 @@ export default function FormBuilder({ fields, onChange, onLoadDefaultFields }) {
               <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
                 <div className="md:col-span-4">
                   <label className="block text-xs font-semibold text-slate-400 mb-1">
-                    欄位標題（同步為試算表表頭）
+                    欄位標題（報名表與匯出欄位名稱）
                   </label>
                   <input
                     type="text"

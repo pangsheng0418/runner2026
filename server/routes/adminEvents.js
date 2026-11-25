@@ -11,6 +11,7 @@ const {
   sanitizeSheetTabName,
 } = require('../services/googleSheets');
 const { computeEventRegistrationState } = require('../services/eventStatus');
+const { generateEnglishEventName } = require('../services/raceNameTranslator');
 const {
   syncEventToCloud,
   deleteEventFromCloud,
@@ -126,6 +127,8 @@ function formatEventRow(row, role = 'organizer') {
       `SELECT
         COUNT(*) as registration_count,
         COALESCE(SUM(total_amount), 0) as total_revenue,
+        SUM(CASE WHEN payment_status = '待繳費' THEN 1 ELSE 0 END) as unpaid_count,
+        SUM(CASE WHEN payment_status = '已繳費' THEN 1 ELSE 0 END) as paid_count,
         SUM(CASE WHEN sheet_sync_status = 'error' THEN 1 ELSE 0 END) as sync_error_count
       FROM registrations WHERE event_id = ?`
     )
@@ -147,6 +150,8 @@ function formatEventRow(row, role = 'organizer') {
     gas_webhook_url: isSuper ? (master.gasUrl || row.gas_webhook_url || '') : '',
     fields,
     registration_count: regCount,
+    unpaid_count: stats?.unpaid_count || 0,
+    paid_count: stats?.paid_count || 0,
     total_revenue: stats?.total_revenue || 0,
     sync_error_count: stats?.sync_error_count || 0,
     regState,
@@ -285,13 +290,15 @@ router.post('/', async (req, res) => {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
+  const englishName = String(body.english_name || '').trim() || generateEnglishEventName(name);
+
   const info = stmt.run(
     ownerId,
     ownerUsername,
     ownerDisplayName,
     slug,
     name,
-    String(body.english_name || '').trim(),
+    englishName,
     eventType,
     timingEventId,
     timingPortalUrl,
@@ -375,16 +382,13 @@ router.put('/:id', async (req, res) => {
     ? body.fields
     : JSON.parse(existing.fields_json || '[]');
 
-  // 統一指向平台母資料庫，不再由各活動覆寫獨立試算表網址
+  // 統一指向平台母資料庫；不接受外部更改分頁名稱，固定沿用建立時之分頁名稱
   const master = getMasterDatabaseConfig();
   const sheetSyncMode = master.configured ? master.mode : existing.sheet_sync_mode || 'local';
   const sheetId = master.configured ? master.sheetId : existing.sheet_id;
   const sheetUrl = master.configured ? master.sheetUrl : existing.sheet_url;
   const gasWebhookUrl = master.configured ? master.gasUrl : existing.gas_webhook_url;
-  const sheetTabName =
-    body.sheet_tab_name !== undefined && String(body.sheet_tab_name).trim()
-      ? buildUniqueTabName(body.sheet_tab_name, id)
-      : existing.sheet_tab_name || sanitizeSheetTabName(name);
+  const sheetTabName = existing.sheet_tab_name || sanitizeSheetTabName(existing.name || name);
 
   const nextEventStatus = ['auto', 'preparing', 'open', 'closed'].includes(body.event_status)
     ? body.event_status
@@ -458,10 +462,9 @@ router.put('/:id', async (req, res) => {
     name,
     body.english_name !== undefined ? String(body.english_name).trim() : existing.english_name || '',
     nextEventType,
-    body.timing_event_id !== undefined ? String(body.timing_event_id).trim() : existing.timing_event_id || slug,
-    body.timing_portal_url !== undefined
-      ? String(body.timing_portal_url).trim()
-      : existing.timing_portal_url || 'https://runchip-timing.vercel.app/',
+    // 晶片系統活動代碼與前台網址鎖定唯讀不可修改；僅保留 GAS 同步網址可修改供未來運用
+    existing.timing_event_id || slug,
+    existing.timing_portal_url || 'https://runchip-timing.vercel.app/',
     body.timing_gas_url !== undefined ? String(body.timing_gas_url).trim() : existing.timing_gas_url || '',
     body.event_date !== undefined ? String(body.event_date) : existing.event_date,
     body.location !== undefined ? String(body.location) : existing.location,

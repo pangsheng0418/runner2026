@@ -22,67 +22,19 @@ function sanitizePublicCreds(googleStatus, role) {
   };
 }
 
-// POST /api/auth/register — 承辦人獨立註冊帳號（各承辦人互相獨立作業）
-router.post('/register', async (req, res) => {
-  const { username, password, displayName, inviteCode } = req.body || {};
-  const cleanUser = String(username || '').trim().toLowerCase();
-  const cleanName = String(displayName || '').trim();
-  const cleanPass = String(password || '');
-
-  // 若系統有設定環境變數 ORGANIZER_REGISTER_CODE，則需驗證承辦人開通碼
-  const requiredCode = String(process.env.ORGANIZER_REGISTER_CODE || '').trim();
-  if (requiredCode && String(inviteCode || '').trim() !== requiredCode) {
-    return res.status(403).json({ error: '承辦人開通授權碼不正確，請洽平台管理員。' });
-  }
-
-  if (!/^[a-z0-9._-]{3,32}$/.test(cleanUser)) {
-    return res.status(400).json({ error: '帳號需為 3~32 碼英文小寫、數字或 ._- 符號。' });
-  }
-  if (cleanPass.length < 6) {
-    return res.status(400).json({ error: '密碼長度至少需 6 個字元。' });
-  }
-  if (!cleanName) {
-    return res.status(400).json({ error: '請填寫承辦單位或承辦人顯示名稱。' });
-  }
-
-  const dup = db.prepare('SELECT id FROM admins WHERE lower(username) = ?').get(cleanUser);
-  if (dup) {
-    return res.status(409).json({ error: `帳號「${cleanUser}」已被使用，請改用其他帳號。` });
-  }
-
-  const hash = bcrypt.hashSync(cleanPass, 10);
-  const info = db
-    .prepare('INSERT INTO admins (username, password_hash, display_name, role) VALUES (?, ?, ?, ?)')
-    .run(cleanUser, hash, cleanName, 'organizer');
-
-  const created = db.prepare('SELECT * FROM admins WHERE id = ?').get(info.lastInsertRowid);
-  try {
-    await syncAdminToCloud(created);
-  } catch (err) {
-    // 若雲端寫入失敗，回滾本地新增以確保資料一致性
-    db.prepare('DELETE FROM admins WHERE id = ?').run(created.id);
-    return res.status(503).json({ error: `雲端資料庫寫入失敗，請稍後重試：${err.message}` });
-  }
-
-  const token = signAdminToken(created);
-  return res.status(201).json({
-    token,
-    admin: {
-      id: created.id,
-      username: created.username,
-      displayName: created.display_name,
-      role: created.role,
-      eventCount: 0,
-    },
-    message: `歡迎加入！承辦人帳號「${cleanName}」已建立，請開始建立您的專屬活動報名表。`,
+// POST /api/auth/register — 已停用一般承辦人自行註冊，僅限最高管理權限於後台建立新承辦人
+router.post('/register', (_req, res) => {
+  return res.status(403).json({
+    error: '已取消公開註冊功能，僅「最高管理權限」帳號可於後台註冊新增承辦人。',
+    code: 'SELF_REGISTER_DISABLED',
   });
 });
 
 // POST /api/auth/login
 router.post('/login', (req, res) => {
-  const { username, password } = req.body || {};
+  const { username, password, loginMode } = req.body || {};
   if (!username || !password) {
-    return res.status(400).json({ error: '請輸入承辦人帳號與密碼。' });
+    return res.status(400).json({ error: '請輸入帳號與密碼。' });
   }
 
   const cleanUser = String(username).trim();
@@ -91,6 +43,14 @@ router.post('/login', (req, res) => {
     .get(cleanUser);
   if (!admin || !bcrypt.compareSync(String(password), admin.password_hash)) {
     return res.status(401).json({ error: '帳號或密碼不正確，請重新確認。' });
+  }
+
+  const role = admin.role || 'organizer';
+  if (loginMode === 'super_admin' && role !== 'super_admin') {
+    return res.status(403).json({
+      error: '此帳號不具備「最高管理權限」，請改用「承辦人登入」進入。',
+      code: 'SUPER_ADMIN_REQUIRED',
+    });
   }
 
   const countRow = db
@@ -104,7 +64,7 @@ router.post('/login', (req, res) => {
       id: admin.id,
       username: admin.username,
       displayName: admin.display_name,
-      role: admin.role || 'organizer',
+      role,
       eventCount: countRow?.cnt || 0,
     },
   });

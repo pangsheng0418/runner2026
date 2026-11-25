@@ -238,11 +238,11 @@ function getDefaultRunningFields() {
     },
     {
       id: 'addons',
-      label: '加購賽事服務',
+      label: '賽事加購服務',
       type: 'checkbox',
       required: false,
       placeholder: '',
-      helperText: '',
+      helperText: '非必選，可依需求複選加購項目',
       options: [
         { label: '疾速聯名防風外套', value: '疾速聯名防風外套', price: 680 },
         { label: '完賽獎牌雷射刻字服務', value: '完賽獎牌雷射刻字服務', price: 150 },

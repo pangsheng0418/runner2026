@@ -1401,8 +1401,19 @@ export default function PublicRegisterPage() {
               )}
             </div>
 
-            {/* 右側：費用試算 + 匯款帳戶 */}
+            {/* 右側：名額狀態 + 費用試算 + 匯款帳戶 */}
             <aside className="hidden lg:block lg:col-span-4 sticky top-20 space-y-4">
+              <div className="tur-control-bar rounded-2xl p-4 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-300">
+                  <Users className="h-4 w-4 text-lime-400" />
+                  <span>報名人員／名額上限</span>
+                </div>
+                <span className="font-mono-num text-base font-black text-lime-300">
+                  {Number(event.registration_count || 0)} /{' '}
+                  {Number(event.max_participants || 0) > 0 ? event.max_participants : '不限'}
+                </span>
+              </div>
+
               {canRegister && (
                 <div className="tur-control-bar rounded-2xl p-5">
                   <div className="flex items-center gap-2 text-amber-300 text-sm font-bold mb-3">
