@@ -20,16 +20,36 @@ export default function AdminLoginPage() {
   const [mode, setMode] = useState(initialMode); // 'organizer' | 'super_admin'
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [inputUnlocked, setInputUnlocked] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // 進入登入頁時清空殘留登入憑證與欄位，避免瀏覽器自動填入密碼讓外人直接登入
+  useEffect(() => {
+    setAdminToken('');
+    setUsername('');
+    setPassword('');
+    setInputUnlocked(false);
+  }, []);
 
   useEffect(() => {
     const queryMode = searchParams.get('mode');
     if (queryMode === 'super_admin' || queryMode === 'organizer') {
       setMode(queryMode);
+      setUsername('');
+      setPassword('');
+      setInputUnlocked(false);
       setError('');
     }
   }, [searchParams]);
+
+  const switchMode = (nextMode) => {
+    setMode(nextMode);
+    setUsername('');
+    setPassword('');
+    setInputUnlocked(false);
+    setError('');
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -83,10 +103,7 @@ export default function AdminLoginPage() {
             <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-950 p-1 border border-slate-800 mb-5">
               <button
                 type="button"
-                onClick={() => {
-                  setMode('organizer');
-                  setError('');
-                }}
+                onClick={() => switchMode('organizer')}
                 className={`inline-flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-extrabold transition ${
                   !isSuperMode
                     ? 'bg-gradient-to-r from-emerald-500 to-lime-400 text-slate-950'
@@ -98,10 +115,7 @@ export default function AdminLoginPage() {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setMode('super_admin');
-                  setError('');
-                }}
+                onClick={() => switchMode('super_admin')}
                 className={`inline-flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-extrabold transition ${
                   isSuperMode
                     ? 'bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950'
@@ -126,7 +140,7 @@ export default function AdminLoginPage() {
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form key={mode} onSubmit={handleSubmit} autoComplete="off" className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5">
                   {isSuperMode ? '最高管理員帳號 *' : '承辦人帳號 *'}
@@ -135,10 +149,21 @@ export default function AdminLoginPage() {
                   <User className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
                   <input
                     type="text"
+                    name={`tur_acct_${mode}`}
                     required
+                    readOnly={!inputUnlocked}
+                    onFocus={() => setInputUnlocked(true)}
+                    onPointerDown={() => setInputUnlocked(true)}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder={isSuperMode ? '請輸入最高管理員帳號' : '請輸入承辦人帳號'}
+                    placeholder={isSuperMode ? '請手動輸入最高管理員帳號' : '請手動輸入承辦人帳號'}
                     className={`w-full rounded-xl border border-slate-700 bg-slate-950 pl-10 pr-4 py-3 text-sm text-white focus:outline-none ${
                       isSuperMode ? 'focus:border-amber-400' : 'focus:border-lime-400'
                     }`}
@@ -152,10 +177,18 @@ export default function AdminLoginPage() {
                   <Lock className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
                   <input
                     type="password"
+                    name={`tur_pass_${mode}`}
                     required
+                    readOnly={!inputUnlocked}
+                    onFocus={() => setInputUnlocked(true)}
+                    onPointerDown={() => setInputUnlocked(true)}
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="請輸入密碼"
+                    placeholder="請手動輸入密碼（系統禁止自動填入）"
                     className={`w-full rounded-xl border border-slate-700 bg-slate-950 pl-10 pr-4 py-3 text-sm text-white focus:outline-none ${
                       isSuperMode ? 'focus:border-amber-400' : 'focus:border-lime-400'
                     }`}

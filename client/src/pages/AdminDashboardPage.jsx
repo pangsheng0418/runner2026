@@ -1216,12 +1216,13 @@ export default function AdminDashboardPage() {
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <form onSubmit={handleCreateUser} className="p-6 space-y-4">
+            <form onSubmit={handleCreateUser} autoComplete="off" className="p-6 space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1">承辦單位 / 顯示名稱 *</label>
                 <input
                   type="text"
                   required
+                  autoComplete="off"
                   value={newUserForm.display_name}
                   onChange={(e) => setNewUserForm({ ...newUserForm, display_name: e.target.value })}
                   placeholder="例如：新竹賽事承辦人"
@@ -1232,7 +1233,11 @@ export default function AdminDashboardPage() {
                 <label className="block text-xs font-bold text-slate-300 mb-1">登入帳號 *</label>
                 <input
                   type="text"
+                  name="new_organizer_acct"
                   required
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
                   value={newUserForm.username}
                   onChange={(e) => setNewUserForm({ ...newUserForm, username: e.target.value })}
                   placeholder="3~32 碼英文小寫或數字"
@@ -1243,8 +1248,12 @@ export default function AdminDashboardPage() {
                 <label className="block text-xs font-bold text-slate-300 mb-1">初始密碼 *（至少 6 碼）</label>
                 <input
                   type="password"
+                  name="new_organizer_pass"
                   required
                   minLength={6}
+                  autoComplete="new-password"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
                   value={newUserForm.password}
                   onChange={(e) => setNewUserForm({ ...newUserForm, password: e.target.value })}
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-amber-400 focus:outline-none"
@@ -1298,12 +1307,13 @@ export default function AdminDashboardPage() {
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <form onSubmit={handleSaveEditUser} className="p-6 space-y-4">
+            <form onSubmit={handleSaveEditUser} autoComplete="off" className="p-6 space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1">承辦單位 / 顯示名稱 *</label>
                 <input
                   type="text"
                   required
+                  autoComplete="off"
                   value={editingUser.display_name}
                   onChange={(e) => setEditingUser({ ...editingUser, display_name: e.target.value })}
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-amber-400 focus:outline-none"
@@ -1326,7 +1336,11 @@ export default function AdminDashboardPage() {
                 </label>
                 <input
                   type="password"
+                  name="reset_organizer_pass"
                   minLength={6}
+                  autoComplete="new-password"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
                   value={editingUser.newPassword || ''}
                   onChange={(e) => setEditingUser({ ...editingUser, newPassword: e.target.value })}
                   placeholder="輸入新密碼（至少 6 碼）"

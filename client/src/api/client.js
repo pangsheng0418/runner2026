@@ -1,14 +1,19 @@
 const TOKEN_KEY = 'runflow_admin_token';
 
 export function getAdminToken() {
-  return localStorage.getItem(TOKEN_KEY) || '';
+  // 清除舊版 localStorage 殘留憑證，改以 sessionStorage 避免關閉分頁後外人直接進入後台
+  if (localStorage.getItem(TOKEN_KEY)) {
+    localStorage.removeItem(TOKEN_KEY);
+  }
+  return sessionStorage.getItem(TOKEN_KEY) || '';
 }
 
 export function setAdminToken(token) {
+  localStorage.removeItem(TOKEN_KEY);
   if (token) {
-    localStorage.setItem(TOKEN_KEY, token);
+    sessionStorage.setItem(TOKEN_KEY, token);
   } else {
-    localStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(TOKEN_KEY);
   }
 }
 

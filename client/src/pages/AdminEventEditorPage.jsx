@@ -1595,6 +1595,10 @@ export default function AdminEventEditorPage() {
                 <div className="space-y-2">
                   <input
                     type="text"
+                    name="chip_admin_acct"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
                     value={chipAdminUser}
                     onChange={(e) => setChipAdminUser(e.target.value)}
                     placeholder="晶片系統管理員帳號"
@@ -1602,6 +1606,10 @@ export default function AdminEventEditorPage() {
                   />
                   <input
                     type="password"
+                    name="chip_admin_secret"
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
                     value={chipAdminPass}
                     onChange={(e) => setChipAdminPass(e.target.value)}
                     placeholder="晶片系統管理員密碼"
