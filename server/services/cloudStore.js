@@ -73,6 +73,8 @@ const REG_COLS = [
   'sheet_sync_error',
   'sheet_row_number',
   'created_at',
+  'group_role',
+  'bundle_code',
 ];
 
 const SYNC_TTL_MS = Number(process.env.CLOUD_SYNC_TTL_MS || 8000);
@@ -202,7 +204,7 @@ async function fetchAllTablesFromCloud(master) {
 
   const res = await sheets.spreadsheets.values.batchGet({
     spreadsheetId: master.sheetId,
-    ranges: [`'${TAB_ADMINS}'!A:Z`, `'${TAB_EVENTS}'!A:AZ`, `'${TAB_REGISTRATIONS}'!A:Z`],
+    ranges: [`'${TAB_ADMINS}'!A:Z`, `'${TAB_EVENTS}'!A:AZ`, `'${TAB_REGISTRATIONS}'!A:AZ`],
   });
 
   const valueRanges = res.data.valueRanges || [];
@@ -349,9 +351,9 @@ function hydrateLocalSqliteFromCloud({ admins, events, registrations }, master) 
         id, event_id, reg_code, bib_number, category_code,
         runner_name, runner_id_number, runner_email, runner_phone,
         answers_json, price_breakdown_json, total_amount, payment_status, remittance_last5,
-        reg_type, group_name, group_code, payment_mode,
+        reg_type, group_name, group_code, group_role, bundle_code, payment_mode,
         sheet_sync_status, sheet_sync_error, sheet_row_number, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     for (const r of registrations) {
@@ -376,6 +378,8 @@ function hydrateLocalSqliteFromCloud({ admins, events, registrations }, master) 
         String(r.reg_type || 'individual'),
         String(r.group_name || ''),
         String(r.group_code || ''),
+        String(r.group_role || ''),
+        String(r.bundle_code || ''),
         String(r.payment_mode || 'individual'),
         String(r.sheet_sync_status || 'synced'),
         String(r.sheet_sync_error || ''),

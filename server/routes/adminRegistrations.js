@@ -15,7 +15,11 @@ const {
   syncAllRegistrationsToCloud,
   syncEventToCloud,
 } = require('../services/cloudStore');
-const { sendRegistrationEmail } = require('../services/emailService');
+const {
+  sendRegistrationEmail,
+  sendGroupLeaderEmail,
+  sendMultiBundleEmail,
+} = require('../services/emailService');
 const { extractRunnerSummary } = require('../services/validation');
 const { buildExcelWorkbookBuffer } = require('../services/excelExport');
 const {
@@ -200,6 +204,8 @@ router.put('/registrations/:id', async (req, res) => {
   const nextPaymentMode =
     body.payment_mode === 'group'
       ? 'group'
+      : body.payment_mode === 'bundle'
+      ? 'bundle'
       : body.payment_mode === 'individual'
       ? 'individual'
       : existing.payment_mode || 'individual';
@@ -207,6 +213,14 @@ router.put('/registrations/:id', async (req, res) => {
     body.group_name !== undefined ? String(body.group_name || '').trim() : existing.group_name || '';
   const nextGroupCode =
     body.group_code !== undefined ? String(body.group_code || '').trim().toUpperCase() : existing.group_code || '';
+  const nextGroupRole =
+    body.group_role !== undefined
+      ? ['leader', 'member', ''].includes(String(body.group_role || '').toLowerCase())
+        ? String(body.group_role || '').toLowerCase()
+        : existing.group_role || ''
+      : existing.group_role || '';
+  const nextBundleCode =
+    body.bundle_code !== undefined ? String(body.bundle_code || '').trim().toUpperCase() : existing.bundle_code || '';
   const nextRemittanceLast5 =
     body.remittance_last5 !== undefined
       ? String(body.remittance_last5 || '').trim()
@@ -239,6 +253,8 @@ router.put('/registrations/:id', async (req, res) => {
       reg_type = ?,
       group_name = ?,
       group_code = ?,
+      group_role = ?,
+      bundle_code = ?,
       payment_mode = ?,
       answers_json = ?,
       price_breakdown_json = ?,
@@ -256,6 +272,8 @@ router.put('/registrations/:id', async (req, res) => {
     nextRegType,
     nextGroupName,
     nextGroupCode,
+    nextGroupRole,
+    nextBundleCode,
     nextPaymentMode,
     JSON.stringify(cleanAnswers),
     JSON.stringify(pricing.breakdown),
@@ -373,7 +391,7 @@ router.patch('/registrations/:id/payment-status', async (req, res) => {
   });
 });
 
-// PATCH /api/admin/events/:eventId/groups/:groupCode/payment-status — 同團一鍵批量對帳（團體匯款核對專用）
+// PATCH /api/admin/events/:eventId/groups/:groupCode/payment-status — 同團一鍵批量對帳（團體匯款核對專用，統一通知團長）
 router.patch('/events/:eventId/groups/:groupCode/payment-status', async (req, res) => {
   const event = getOwnedEventOrDeny(req, res, req.params.eventId);
   if (!event) return;
@@ -385,14 +403,16 @@ router.patch('/events/:eventId/groups/:groupCode/payment-status', async (req, re
   }
 
   const members = db
-    .prepare('SELECT * FROM registrations WHERE event_id = ? AND upper(group_code) = ?')
+    .prepare(
+      "SELECT * FROM registrations WHERE event_id = ? AND upper(group_code) = ? AND payment_status != '已取消' ORDER BY id ASC"
+    )
     .all(event.id, groupCode);
   if (members.length === 0) {
-    return res.status(404).json({ error: `找不到團報代碼「${groupCode}」的報名成員。` });
+    return res.status(404).json({ error: `找不到團報代碼「${groupCode}」的有效報名成員。` });
   }
 
   db.prepare(
-    'UPDATE registrations SET payment_status = ? WHERE event_id = ? AND upper(group_code) = ?'
+    "UPDATE registrations SET payment_status = ? WHERE event_id = ? AND upper(group_code) = ? AND payment_status != '已取消'"
   ).run(status, event.id, groupCode);
 
   const updatedMembers = db
@@ -400,24 +420,29 @@ router.patch('/events/:eventId/groups/:groupCode/payment-status', async (req, re
     .all(event.id, groupCode);
 
   const master = getMasterDatabaseConfig();
-  const siteOrigin = `${req.protocol}://${req.get('host')}`;
-  let sentCount = 0;
-
   for (const m of updatedMembers) {
     if (master.configured || event.sheet_sync_mode !== 'local') {
       await updatePaymentStatusInSheet(event, m.reg_code, status).catch(() => {});
     }
-    if (status === '已繳費' || status === '已取消') {
-      const mailRes = await sendRegistrationEmail({
-        type: 'payment_updated',
-        event,
-        registration: m,
-        answers: JSON.parse(m.answers_json || '{}'),
-        priceBreakdown: JSON.parse(m.price_breakdown_json || '[]'),
-        siteOrigin,
-      });
-      if (mailRes.sent) sentCount += 1;
-    }
+  }
+
+  let mailSent = false;
+  if (status === '已繳費' || status === '已取消') {
+    const siteOrigin = `${req.protocol}://${req.get('host')}`;
+    const totalAmt = updatedMembers.reduce((s, m) => s + Number(m.total_amount || 0), 0);
+    const last5 = updatedMembers.find((m) => m.remittance_last5)?.remittance_last5 || '';
+    const mailRes = await sendGroupLeaderEmail({
+      type: 'payment_updated',
+      event,
+      groupName: updatedMembers[0].group_name || groupCode,
+      groupCode,
+      members: updatedMembers,
+      totalAmount: totalAmt,
+      remittanceLast5: last5,
+      paymentStatus: status,
+      siteOrigin,
+    });
+    mailSent = Boolean(mailRes.sent);
   }
 
   await syncAllRegistrationsToCloud();
@@ -427,8 +452,249 @@ router.patch('/events/:eventId/groups/:groupCode/payment-status', async (req, re
     updatedCount: updatedMembers.length,
     registrations: updatedMembers.map(formatRegistrationRow),
     message: `已將團體「${updatedMembers[0].group_name || groupCode}」共 ${updatedMembers.length} 位成員批次設為「${status}」${
-      sentCount > 0 ? `（已寄發 ${sentCount} 封通知信）` : ''
+      mailSent ? '（已統一寄發通知信給團長）' : ''
     }！`,
+  });
+});
+
+// ==================== 多場聯合報名合併單 (TURM-...) 彙總、匯出與跨場一次入帳 ====================
+function summarizeBundlesForEvent(eventId, adminUser) {
+  const bundleCodesRows = db
+    .prepare(
+      `SELECT DISTINCT upper(bundle_code) as bundle_code
+       FROM registrations
+       WHERE event_id = ? AND bundle_code != '' AND payment_status != '已取消'`
+    )
+    .all(Number(eventId));
+
+  const codes = bundleCodesRows
+    .map((r) => String(r.bundle_code || '').trim().toUpperCase())
+    .filter((c) => /^TURM-[A-Z0-9-]+$/i.test(c));
+
+  if (codes.length === 0) return [];
+
+  const isSuperAdmin = adminUser?.role === 'super_admin';
+  const out = [];
+
+  for (const code of codes) {
+    const rows = db
+      .prepare(
+        `SELECT r.*, e.name as event_name, e.event_date as event_date, e.slug as event_slug,
+                e.owner_admin_id as event_owner_id, e.owner_username as event_owner_username
+         FROM registrations r
+         JOIN events e ON e.id = r.event_id
+         WHERE upper(r.bundle_code) = ? AND r.payment_status != '已取消'
+         ORDER BY r.id ASC`
+      )
+      .all(code);
+    if (rows.length === 0) continue;
+
+    const first = rows[0];
+    const paidCount = rows.filter((r) => r.payment_status === '已繳費').length;
+    const unpaidCount = rows.length - paidCount;
+    const totalAmount = rows.reduce((s, r) => s + Number(r.total_amount || 0), 0);
+    const last5 = rows.find((r) => r.remittance_last5)?.remittance_last5 || '';
+    const canCrossConfirm =
+      isSuperAdmin ||
+      rows.every(
+        (r) =>
+          Number(r.event_owner_id) === Number(adminUser?.id) ||
+          String(r.event_owner_username || '').toLowerCase() === String(adminUser?.username || '').toLowerCase()
+      );
+
+    out.push({
+      bundle_code: code,
+      runner_name: first.runner_name || '',
+      id_masked: maskIdNumber(first.runner_id_number),
+      runner_id_number: first.runner_id_number || '',
+      runner_phone: first.runner_phone || '',
+      runner_email: first.runner_email || '',
+      remittance_last5: last5,
+      created_at: first.created_at || '',
+      total_amount: totalAmount,
+      paid_count: paidCount,
+      unpaid_count: unpaidCount,
+      all_paid: rows.length > 0 && unpaidCount === 0,
+      can_cross_confirm: canCrossConfirm,
+      items: rows.map((r) => ({
+        id: r.id,
+        event_id: r.event_id,
+        event_slug: r.event_slug,
+        event_name: r.event_name,
+        event_date: r.event_date,
+        reg_code: r.reg_code,
+        category_code: r.category_code || '',
+        bib_number: r.bib_number || '',
+        total_amount: Number(r.total_amount || 0),
+        payment_status: r.payment_status,
+      })),
+    });
+  }
+
+  return out.sort(
+    (a, b) =>
+      (b.unpaid_count > 0 ? 1 : 0) - (a.unpaid_count > 0 ? 1 : 0) ||
+      String(b.created_at).localeCompare(String(a.created_at))
+  );
+}
+
+// GET /api/admin/events/:eventId/bundles — 取得包含本活動的多場聯合報名合併單彙總
+router.get('/events/:eventId/bundles', (req, res) => {
+  const event = getOwnedEventOrDeny(req, res, req.params.eventId);
+  if (!event) return;
+
+  const me = db.prepare('SELECT id, username, role FROM admins WHERE id = ?').get(req.admin.id);
+  const bundles = summarizeBundlesForEvent(event.id, me);
+  return res.json({ bundles, total: bundles.length });
+});
+
+// GET /api/admin/events/:eventId/bundles/export-excel — 匯出多場合併繳費對帳總表 (.xlsx)
+router.get('/events/:eventId/bundles/export-excel', (req, res) => {
+  const event = getOwnedEventOrDeny(req, res, req.params.eventId);
+  if (!event) return;
+
+  const me = db.prepare('SELECT id, username, role FROM admins WHERE id = ?').get(req.admin.id);
+  const bundles = summarizeBundlesForEvent(event.id, me);
+
+  const headers = [
+    '序號',
+    '合併單號',
+    '選手姓名',
+    '身分證(隱碼)',
+    '手機',
+    'Email',
+    '匯款末五碼',
+    '合併場次數',
+    '合併總金額',
+    '對帳狀態',
+    '包含場次與各場明細',
+  ];
+
+  const dataRows = bundles.map((b, idx) => [
+    idx + 1,
+    b.bundle_code,
+    b.runner_name,
+    b.id_masked,
+    b.runner_phone,
+    b.runner_email,
+    b.remittance_last5 || '',
+    b.items.length,
+    Number(b.total_amount || 0),
+    b.all_paid ? '已全數入帳' : `待對帳 (${b.unpaid_count}/${b.items.length}場)`,
+    b.items
+      .map(
+        (it) =>
+          `${it.event_name}[${it.category_code || '—'}] NT$${it.total_amount}(${it.payment_status}${
+            it.bib_number ? `/${it.bib_number}` : ''
+          })`
+      )
+      .join('；'),
+  ]);
+
+  const buffer = buildExcelWorkbookBuffer({
+    sheetName: '多場合併繳費對帳總表',
+    headers,
+    rows: dataRows,
+  });
+
+  res.setHeader(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  );
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename*=UTF-8''${encodeURIComponent(`${event.name}-多場合併對帳總表.xlsx`)}`
+  );
+  return res.send(buffer);
+});
+
+// PATCH /api/admin/bundles/:bundleCode/payment-status — 一鍵跨場整單入帳（合併單全部場次同步更新）
+router.patch('/bundles/:bundleCode/payment-status', async (req, res) => {
+  const bundleCode = String(req.params.bundleCode || '').trim().toUpperCase();
+  const status = String(req.body?.payment_status || '已繳費').trim();
+  if (!['待繳費', '已繳費', '已取消'].includes(status)) {
+    return res.status(400).json({ error: '無效的繳費狀態。' });
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT r.*, e.owner_admin_id as event_owner_id, e.owner_username as event_owner_username
+       FROM registrations r
+       JOIN events e ON e.id = r.event_id
+       WHERE upper(r.bundle_code) = ? AND r.payment_status != '已取消'
+       ORDER BY r.id ASC`
+    )
+    .all(bundleCode);
+
+  if (rows.length === 0) {
+    return res.status(404).json({ error: `找不到合併單「${bundleCode}」的有效報名紀錄。` });
+  }
+
+  const me = db.prepare('SELECT id, username, role FROM admins WHERE id = ?').get(req.admin.id);
+  const isSuperAdmin = me?.role === 'super_admin';
+  const canAll =
+    isSuperAdmin ||
+    rows.every(
+      (r) =>
+        Number(r.event_owner_id) === Number(req.admin.id) ||
+        String(r.event_owner_username || '').toLowerCase() === String(req.admin.username || '').toLowerCase()
+    );
+  if (!canAll) {
+    return res.status(403).json({
+      error: '此合併單包含其他承辦人的活動，僅最高權限管理員或同承辦人可執行整單跨場對帳。',
+    });
+  }
+
+  db.prepare(
+    "UPDATE registrations SET payment_status = ? WHERE upper(bundle_code) = ? AND payment_status != '已取消'"
+  ).run(status, bundleCode);
+
+  const refreshedRows = db
+    .prepare('SELECT * FROM registrations WHERE upper(bundle_code) = ? ORDER BY id ASC')
+    .all(bundleCode);
+
+  const master = getMasterDatabaseConfig();
+  const eventItems = [];
+  for (const r of refreshedRows) {
+    const ev = db.prepare('SELECT * FROM events WHERE id = ?').get(r.event_id);
+    if (!ev) continue;
+    eventItems.push({ event: ev, registration: r });
+    if (master.configured || ev.sheet_sync_mode !== 'local') {
+      await updatePaymentStatusInSheet(ev, r.reg_code, status).catch(() => {});
+    }
+  }
+
+  let mailSent = false;
+  if ((status === '已繳費' || status === '已取消') && eventItems.length > 0) {
+    const siteOrigin = `${req.protocol}://${req.get('host')}`;
+    const first = eventItems[0];
+    const totalAmt = refreshedRows.reduce((s, r) => s + Number(r.total_amount || 0), 0);
+    const last5 = refreshedRows.find((r) => r.remittance_last5)?.remittance_last5 || '';
+    const mailRes = await sendMultiBundleEmail({
+      type: 'payment_updated',
+      bundleCode,
+      runnerName: first.registration.runner_name,
+      runnerEmail: first.registration.runner_email,
+      organizerName: first.event.owner_display_name || '主辦單位',
+      items: eventItems,
+      totalAmount: totalAmt,
+      remittanceLast5: last5,
+      paymentStatus: status,
+      paymentInfo: first.event.payment_info || '',
+      siteOrigin,
+    });
+    mailSent = Boolean(mailRes.sent);
+  }
+
+  await syncAllRegistrationsToCloud();
+
+  return res.json({
+    bundleCode,
+    updatedCount: refreshedRows.length,
+    registrations: refreshedRows.map(formatRegistrationRow),
+    message: `合併單 ${bundleCode} 共 ${refreshedRows.length} 場已整單跨場設為「${status}」${
+      mailSent ? '，並已寄發合併通知信！' : '！'
+    }`,
   });
 });
 
@@ -604,14 +870,16 @@ router.get('/events/:eventId/registrations/export-csv', (req, res) => {
     const answers = JSON.parse(reg.answers_json || '{}');
     const rowMap = {
       '報名序號': reg.reg_code,
-      '報名類型': reg.reg_type === 'group' ? '團體報名' : '個人報名',
+      '報名類型': reg.reg_type === 'group' ? '團體報名' : reg.bundle_code ? '多場聯合報名' : '個人報名',
       '團體名稱': reg.group_name || '',
       '團報代碼': reg.group_code || '',
+      '團報角色': reg.group_role === 'leader' ? '團長' : reg.group_role === 'member' ? '組員' : '',
+      '合併單號': reg.bundle_code || '',
       '參賽編號': reg.bib_number || '',
       '分組代碼': reg.category_code || '',
       '報名時間': reg.created_at,
       '應繳總金額': reg.total_amount,
-      '匯款方式': reg.payment_mode === 'group' ? '團體匯款' : '個別匯款',
+      '匯款方式': reg.payment_mode === 'group' ? '團體匯款' : reg.payment_mode === 'bundle' ? '合併匯款' : '個別匯款',
       '匯款後五碼': reg.remittance_last5 || '',
       '繳費狀態': reg.payment_status,
     };
@@ -647,14 +915,16 @@ router.get('/events/:eventId/registrations/export-excel', (req, res) => {
     const answers = JSON.parse(reg.answers_json || '{}');
     const rowMap = {
       '報名序號': reg.reg_code,
-      '報名類型': reg.reg_type === 'group' ? '團體報名' : '個人報名',
+      '報名類型': reg.reg_type === 'group' ? '團體報名' : reg.bundle_code ? '多場聯合報名' : '個人報名',
       '團體名稱': reg.group_name || '',
       '團報代碼': reg.group_code || '',
+      '團報角色': reg.group_role === 'leader' ? '團長' : reg.group_role === 'member' ? '組員' : '',
+      '合併單號': reg.bundle_code || '',
       '參賽編號': reg.bib_number || '',
       '分組代碼': reg.category_code || '',
       '報名時間': reg.created_at,
       '應繳總金額': Number(reg.total_amount || 0),
-      '匯款方式': reg.payment_mode === 'group' ? '團體匯款' : '個別匯款',
+      '匯款方式': reg.payment_mode === 'group' ? '團體匯款' : reg.payment_mode === 'bundle' ? '合併匯款' : '個別匯款',
       '匯款後五碼': reg.remittance_last5 || '',
       '繳費狀態': reg.payment_status,
     };

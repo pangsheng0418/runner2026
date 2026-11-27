@@ -139,8 +139,10 @@ function extractGenderFromRaw(fields, rawAnswers) {
 
 /**
  * 依據活動的動態欄位設定，驗證前台填寫資料並計算應繳總金額
+ * options.allowEmptyRemittance: 團報／多場聯合報名允許先留空事後補填末五碼
  */
-function validateAndCalculateRegistration(fields, rawAnswers) {
+function validateAndCalculateRegistration(fields, rawAnswers, options = {}) {
+  const allowEmptyRemittance = Boolean(options?.allowEmptyRemittance);
   const errors = {};
   const cleanAnswers = {};
   const priceBreakdown = [];
@@ -191,8 +193,13 @@ function validateAndCalculateRegistration(fields, rawAnswers) {
     }
 
     const strVal = rawVal === undefined || rawVal === null ? '' : String(rawVal).trim();
+    const isRemittanceField = field.id === 'remittance_last5' || field.validation === 'remittance_last5';
 
     if (field.required && !strVal) {
+      if (isRemittanceField && allowEmptyRemittance) {
+        cleanAnswers[field.id] = '';
+        continue;
+      }
       errors[field.id] = `「${field.label}」為必填欄位`;
       continue;
     }

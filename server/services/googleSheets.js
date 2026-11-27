@@ -7,6 +7,8 @@ const SYSTEM_HEADERS = [
   '報名類型',
   '團體名稱',
   '團報代碼',
+  '團報角色',
+  '合併單號',
   '參賽編號',
   '分組代碼',
   '報名時間',
@@ -661,14 +663,16 @@ async function appendRegistrationToSheet(event, fields, registration) {
   // 建立「表頭名稱 -> 欄位值」對照表
   const valueByHeader = {
     '報名序號': registration.reg_code,
-    '報名類型': registration.reg_type === 'group' ? '團體報名' : '個人報名',
+    '報名類型': registration.reg_type === 'group' ? '團體報名' : registration.bundle_code ? '多場聯合報名' : '個人報名',
     '團體名稱': registration.group_name || '',
     '團報代碼': registration.group_code || '',
+    '團報角色': registration.group_role === 'leader' ? '團長' : registration.group_role === 'member' ? '組員' : '',
+    '合併單號': registration.bundle_code || '',
     '參賽編號': registration.bib_number || '',
     '分組代碼': registration.category_code || '',
     '報名時間': registration.created_at,
     '應繳總金額': registration.total_amount,
-    '匯款方式': registration.payment_mode === 'group' ? '團體匯款' : '個別匯款',
+    '匯款方式': registration.payment_mode === 'group' ? '團體匯款' : registration.payment_mode === 'bundle' ? '合併匯款' : '個別匯款',
     '匯款後五碼': registration.remittance_last5 || '',
     '繳費狀態': registration.payment_status || '待繳費',
   };
@@ -1012,14 +1016,16 @@ async function updateRegistrationInSheet(event, fields, registration) {
 
   const valueByHeader = {
     '報名序號': registration.reg_code,
-    '報名類型': registration.reg_type === 'group' ? '團體報名' : '個人報名',
+    '報名類型': registration.reg_type === 'group' ? '團體報名' : registration.bundle_code ? '多場聯合報名' : '個人報名',
     '團體名稱': registration.group_name || '',
     '團報代碼': registration.group_code || '',
+    '團報角色': registration.group_role === 'leader' ? '團長' : registration.group_role === 'member' ? '組員' : '',
+    '合併單號': registration.bundle_code || '',
     '參賽編號': registration.bib_number || '',
     '分組代碼': registration.category_code || '',
     '報名時間': registration.created_at,
     '應繳總金額': registration.total_amount,
-    '匯款方式': registration.payment_mode === 'group' ? '團體匯款' : '個別匯款',
+    '匯款方式': registration.payment_mode === 'group' ? '團體匯款' : registration.payment_mode === 'bundle' ? '合併匯款' : '個別匯款',
     '匯款後五碼': registration.remittance_last5 || '',
     '繳費狀態': registration.payment_status || '待繳費',
   };

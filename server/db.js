@@ -93,6 +93,8 @@ db.exec(`
     reg_type TEXT NOT NULL DEFAULT 'individual',
     group_name TEXT NOT NULL DEFAULT '',
     group_code TEXT NOT NULL DEFAULT '',
+    group_role TEXT NOT NULL DEFAULT '',
+    bundle_code TEXT NOT NULL DEFAULT '',
     payment_mode TEXT NOT NULL DEFAULT 'individual',
     sheet_sync_status TEXT NOT NULL DEFAULT 'local',
     sheet_sync_error TEXT NOT NULL DEFAULT '',
@@ -105,7 +107,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_registrations_reg_code ON registrations(reg_code);
 `);
 
-// 向下相容自動遷移：舊資料庫自動補齊欄位（多承辦人獨立隔離、活動三態、統一資料庫與晶片串接）
+// 向下相容自動遷移：舊資料庫自動補齊欄位（多承辦人獨立隔離、活動三態、統一資料庫與晶片串接、團報角色與多場合併單）
 function ensureColumn(table, column, definition) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all();
   if (!cols.some((c) => c.name === column)) {
@@ -128,9 +130,13 @@ ensureColumn('registrations', 'remittance_last5', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('registrations', 'reg_type', "TEXT NOT NULL DEFAULT 'individual'");
 ensureColumn('registrations', 'group_name', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('registrations', 'group_code', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('registrations', 'group_role', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('registrations', 'bundle_code', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('registrations', 'payment_mode', "TEXT NOT NULL DEFAULT 'individual'");
 
 db.exec('CREATE INDEX IF NOT EXISTS idx_events_owner_admin_id ON events(owner_admin_id);');
+db.exec('CREATE INDEX IF NOT EXISTS idx_registrations_group_code ON registrations(group_code);');
+db.exec('CREATE INDEX IF NOT EXISTS idx_registrations_bundle_code ON registrations(bundle_code);');
 
 /**
  * 路跑活動標準預設欄位範本（建立新活動時自動帶入）

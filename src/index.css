@@ -1,0 +1,172 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+/* 全站字體放大基準（預設 18px，並支援使用者依需求即時切換四段字級） */
+html {
+  font-size: 18px;
+}
+html[data-font-scale="sm"] {
+  font-size: 16px;
+}
+html[data-font-scale="md"] {
+  font-size: 18px;
+}
+html[data-font-scale="lg"] {
+  font-size: 20px;
+}
+html[data-font-scale="xl"] {
+  font-size: 22px;
+}
+
+/* 讓既有小標籤字級隨全站字級比例同步放大 */
+.text-\[11px\] {
+  font-size: 0.78rem !important;
+  line-height: 1.35 !important;
+}
+.text-\[10px\] {
+  font-size: 0.72rem !important;
+  line-height: 1.3 !important;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Noto Sans TC", "Microsoft JhengHei", "Segoe UI", Roboto, sans-serif;
+  background-color: #020617;
+  color: #f8fafc;
+  font-size: 1rem;
+}
+
+/* TUR 官方深邃舞台背景：36px 細網格 + 萊姆綠 / 天空藍 / 琥珀金 三向環境光暈 */
+.tur-stage-bg {
+  background-color: #030712;
+  background-image:
+    radial-gradient(circle at 12% 8%, rgba(132, 204, 22, 0.11), transparent 36%),
+    radial-gradient(circle at 88% 10%, rgba(14, 165, 233, 0.12), transparent 38%),
+    radial-gradient(circle at 50% 96%, rgba(245, 158, 11, 0.08), transparent 40%),
+    linear-gradient(rgba(148, 163, 184, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.045) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 100% 100%, 36px 36px, 36px 36px;
+  background-attachment: fixed;
+}
+
+/* TUR 頂部毛玻璃導覽列 + 2px 萊姆綠→天空藍→琥珀金底部光條 */
+.tur-header-bar {
+  background: linear-gradient(180deg, rgba(10, 17, 34, 0.94) 0%, rgba(7, 13, 27, 0.88) 100%);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.tur-accent-strip {
+  height: 2px;
+  background: linear-gradient(90deg, #84cc16 0%, #38bdf8 52%, #f59e0b 100%);
+}
+
+/* TUR 控制與卡片毛玻璃表面 */
+.tur-control-bar {
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.88) 0%, rgba(8, 14, 28, 0.92) 100%);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 14px 36px -14px rgba(0, 0, 0, 0.65);
+}
+
+/* TUR 大廳三大入口卡片（仿照 runchip-timing .portal-entry-box） */
+.tur-portal-box {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1.5rem;
+  min-height: 158px;
+  background: linear-gradient(160deg, rgba(17, 26, 46, 0.92), rgba(9, 15, 30, 0.96));
+  transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+}
+
+.tur-portal-box::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+}
+
+.tur-portal-box:hover {
+  transform: translateY(-4px);
+}
+
+.tur-portal-sky {
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  box-shadow: 0 16px 34px -18px rgba(14, 165, 233, 0.4);
+}
+.tur-portal-sky::before {
+  background: linear-gradient(90deg, #0ea5e9, #7dd3fc);
+}
+.tur-portal-sky:hover {
+  border-color: rgba(125, 211, 252, 0.85);
+  box-shadow: 0 22px 42px -16px rgba(14, 165, 233, 0.55);
+}
+
+.tur-portal-emerald {
+  border: 1px solid rgba(52, 211, 153, 0.45);
+  box-shadow: 0 16px 34px -18px rgba(16, 185, 129, 0.4);
+}
+.tur-portal-emerald::before {
+  background: linear-gradient(90deg, #10b981, #84cc16);
+}
+.tur-portal-emerald:hover {
+  border-color: rgba(132, 204, 22, 0.85);
+  box-shadow: 0 22px 42px -16px rgba(16, 185, 129, 0.55);
+}
+
+.tur-portal-amber {
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  box-shadow: 0 16px 34px -18px rgba(245, 158, 11, 0.4);
+}
+.tur-portal-amber::before {
+  background: linear-gradient(90deg, #f59e0b, #fde047);
+}
+.tur-portal-amber:hover {
+  border-color: rgba(253, 224, 71, 0.85);
+  box-shadow: 0 22px 42px -16px rgba(245, 158, 11, 0.55);
+}
+
+/* 等寬對齊數字（號碼布、倒數計時、費用、隱碼身分證） */
+.font-mono-num {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 戶外高對比強光模式（與 TUR 晶片系統一致） */
+body.high-contrast,
+body.high-contrast .tur-stage-bg {
+  background: #000000 !important;
+  background-image: none !important;
+  color: #ffffff !important;
+}
+body.high-contrast .tur-control-bar,
+body.high-contrast .tur-portal-box,
+body.high-contrast .tur-card {
+  background: #000000 !important;
+  border: 3px solid #facc15 !important;
+  box-shadow: none !important;
+}
+
+/* 自訂深色捲軸 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #84cc16;
+}
