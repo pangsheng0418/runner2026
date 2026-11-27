@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Sun, Moon, Home, ShieldCheck, Search, Type } from 'lucide-react';
+import { Sun, Moon, Home, ShieldCheck, Search, Type, ShoppingCart } from 'lucide-react';
 import TurLogo from './TurLogo';
 import {
   FONT_SCALES,
@@ -14,6 +14,7 @@ export default function TurHeader({
   subtitle = '',
   rightSlot = null,
   showHomeLink = false,
+  showMultiLink = false,
   showLookupLink = false,
   showAdminLink = false,
   homeLabel = '活動列表',
@@ -102,6 +103,16 @@ export default function TurHeader({
             >
               <Home className="h-3.5 w-3.5" />
               <span>{homeLabel}</span>
+            </Link>
+          )}
+
+          {showMultiLink && (
+            <Link
+              to="/multi-register"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-400/50 bg-emerald-500 px-3 py-1.5 text-xs font-black text-slate-950 hover:bg-emerald-400 transition shadow"
+            >
+              <ShoppingCart className="h-3.5 w-3.5" />
+              <span>聯合報名</span>
             </Link>
           )}
 

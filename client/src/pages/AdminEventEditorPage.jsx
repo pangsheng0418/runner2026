@@ -28,6 +28,8 @@ import {
   Sparkles,
   Calculator,
   AlertCircle,
+  Crown,
+  Package,
 } from 'lucide-react';
 import { apiRequest, getAdminToken, setAdminToken } from '../api/client';
 import { generateEnglishEventName } from '../utils/raceNameTranslator';
@@ -89,6 +91,7 @@ export default function AdminEventEditorPage() {
   const [currentAdmin, setCurrentAdmin] = useState(null);
   const [organizers, setOrganizers] = useState([]);
   const [registrations, setRegistrations] = useState([]);
+  const [eventBundles, setEventBundles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -139,9 +142,10 @@ export default function AdminEventEditorPage() {
     setLoading(true);
     setForbiddenError('');
     try {
-      const [evRes, regRes] = await Promise.all([
+      const [evRes, regRes, bdlRes] = await Promise.all([
         apiRequest(`/api/admin/events/${id}`, { auth: true }),
         apiRequest(`/api/admin/events/${id}/registrations`, { auth: true }),
+        apiRequest(`/api/admin/events/${id}/bundles`, { auth: true }).catch(() => ({ bundles: [] })),
       ]);
       const loadedEv = evRes.event;
       setEvent(loadedEv);
@@ -153,6 +157,7 @@ export default function AdminEventEditorPage() {
       if (evRes.currentAdmin) setCurrentAdmin(evRes.currentAdmin);
       if (Array.isArray(evRes.organizers)) setOrganizers(evRes.organizers);
       setRegistrations(regRes.registrations || []);
+      setEventBundles(bdlRes?.bundles || []);
     } catch (err) {
       if (err.status === 401) {
         setAdminToken('');
@@ -296,6 +301,57 @@ export default function AdminEventEditorPage() {
       showNotice('success', res.message);
     } catch (err) {
       showNotice('error', err.message);
+    }
+  };
+
+  const handleBundlePaymentStatus = async (bundleCode, nextStatus = '已繳費') => {
+    if (
+      !window.confirm(
+        `確定要將合併單「${bundleCode}」全部場次一次跨場設為「${nextStatus}」嗎？`
+      )
+    ) {
+      return;
+    }
+    try {
+      const res = await apiRequest(
+        `/api/admin/bundles/${encodeURIComponent(bundleCode)}/payment-status`,
+        {
+          method: 'PATCH',
+          auth: true,
+          body: { payment_status: nextStatus },
+        }
+      );
+      const updatedMap = new Map((res.registrations || []).map((r) => [r.id, r]));
+      setRegistrations((prev) => prev.map((r) => updatedMap.get(r.id) || r));
+      // 同步刷新合併單清單
+      const bdlRes = await apiRequest(`/api/admin/events/${id}/bundles`, { auth: true }).catch(() => null);
+      if (bdlRes?.bundles) setEventBundles(bdlRes.bundles);
+      showNotice('success', res.message);
+    } catch (err) {
+      showNotice('error', err.message);
+    }
+  };
+
+  const handleExportBundleExcel = async () => {
+    setBusyAction('bundle_excel');
+    try {
+      const token = getAdminToken();
+      const res = await fetch(`/api/admin/events/${id}/bundles/export-excel`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('匯出合併對帳總表失敗');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${event?.name || 'event'}-多場合併對帳總表.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showNotice('success', '已成功下載多場聯合報名合併對帳總表（.xlsx）！');
+    } catch (err) {
+      showNotice('error', err.message);
+    } finally {
+      setBusyAction('');
     }
   };
 
@@ -573,9 +629,43 @@ export default function AdminEventEditorPage() {
       String(r.runner_id_number).toLowerCase().includes(q) ||
       String(r.remittance_last5 || '').toLowerCase().includes(q) ||
       String(r.group_name || '').toLowerCase().includes(q) ||
-      String(r.group_code || '').toLowerCase().includes(q)
+      String(r.group_code || '').toLowerCase().includes(q) ||
+      String(r.bundle_code || '').toLowerCase().includes(q)
     );
   });
+
+  // 彙總本活動所有團報（比照路跑管理系統 summarizeGroupOrders）
+  const groupSummaries = useMemo(() => {
+    const map = new Map();
+    const sortedAsc = [...registrations].sort((a, b) => Number(a.id) - Number(b.id));
+    for (const r of sortedAsc) {
+      const gc = String(r.group_code || '').trim().toUpperCase();
+      if (!gc || r.payment_status === '已取消') continue;
+      if (!map.has(gc)) map.set(gc, []);
+      map.get(gc).push(r);
+    }
+    const out = [];
+    for (const [gc, members] of map.entries()) {
+      const leader =
+        members.find((m) => String(m.group_role || '').toLowerCase() === 'leader') || members[0];
+      const ordered = [leader, ...members.filter((m) => m.id !== leader.id)];
+      const unpaidCount = ordered.filter((m) => m.payment_status !== '已繳費').length;
+      const totalAmount = ordered.reduce((s, m) => s + Number(m.total_amount || 0), 0);
+      const last5 = leader.remittance_last5 || (ordered.find((m) => m.remittance_last5)?.remittance_last5 || '');
+      out.push({
+        group_code: gc,
+        group_name: leader.group_name || '團體報名',
+        leader,
+        members: ordered,
+        member_count: ordered.length,
+        unpaid_count: unpaidCount,
+        all_paid: ordered.length > 0 && unpaidCount === 0,
+        total_amount: totalAmount,
+        remittance_last5: last5,
+      });
+    }
+    return out.sort((a, b) => Number(a.all_paid) - Number(b.all_paid) || a.group_code.localeCompare(b.group_code));
+  }, [registrations]);
 
   const filteredReconcileRegs = registrations
     .filter((r) => {
@@ -588,6 +678,7 @@ export default function AdminEventEditorPage() {
         String(r.runner_name || '').toLowerCase().includes(q) ||
         String(r.group_name || '').toLowerCase().includes(q) ||
         String(r.group_code || '').toLowerCase().includes(q) ||
+        String(r.bundle_code || '').toLowerCase().includes(q) ||
         String(r.remittance_last5 || '').toLowerCase().includes(q) ||
         String(r.reg_code || '').toLowerCase().includes(q)
       );
@@ -1173,12 +1264,28 @@ export default function AdminEventEditorPage() {
                           {reg.reg_code}
                           <div className="mt-0.5 flex flex-wrap items-center gap-1 font-sans">
                             {reg.reg_type === 'group' ? (
-                              <span className="rounded bg-purple-500/20 border border-purple-400/40 px-1.5 py-0.5 text-[10px] font-bold text-purple-200">
-                                團報：{reg.group_name || reg.group_code}
-                              </span>
+                              <>
+                                <span
+                                  className={`rounded px-1.5 py-0.5 text-[10px] font-black ${
+                                    reg.group_role === 'leader'
+                                      ? 'bg-amber-400 text-slate-950'
+                                      : 'bg-slate-800 text-slate-300'
+                                  }`}
+                                >
+                                  {reg.group_role === 'leader' ? '👑 團長' : '👥 組員'}
+                                </span>
+                                <span className="rounded bg-purple-500/20 border border-purple-400/40 px-1.5 py-0.5 text-[10px] font-bold text-purple-200">
+                                  {reg.group_name || reg.group_code}
+                                </span>
+                              </>
                             ) : (
                               <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400">
                                 個人{reg.group_name ? ` · ${reg.group_name}` : ''}
+                              </span>
+                            )}
+                            {reg.bundle_code && (
+                              <span className="rounded bg-emerald-500/20 border border-emerald-400/40 px-1.5 py-0.5 font-mono-num text-[10px] font-bold text-emerald-300">
+                                📦 {reg.bundle_code}
                               </span>
                             )}
                           </div>
@@ -1204,10 +1311,16 @@ export default function AdminEventEditorPage() {
                               className={`inline-block w-fit rounded px-1.5 py-0.5 font-sans text-[10px] font-bold ${
                                 reg.payment_mode === 'group'
                                   ? 'bg-amber-500/20 text-amber-300 border border-amber-400/35'
+                                  : reg.payment_mode === 'bundle'
+                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/35'
                                   : 'bg-slate-800 text-slate-300'
                               }`}
                             >
-                              {reg.payment_mode === 'group' ? '團體匯款' : '個別匯款'}
+                              {reg.payment_mode === 'group'
+                                ? '團體匯款'
+                                : reg.payment_mode === 'bundle'
+                                ? '合併匯款'
+                                : '個別匯款'}
                             </span>
                             {reg.remittance_last5 ? (
                               <span className="inline-block w-fit rounded-md border border-sky-500/40 bg-sky-500/15 px-2 py-0.5 text-xs font-black text-sky-300">
@@ -1322,6 +1435,193 @@ export default function AdminEventEditorPage() {
               </div>
             </div>
 
+            {/* 👥 團報對帳彙總區（比照路跑管理系統） */}
+            {groupSummaries.length > 0 && (
+              <div className="rounded-2xl border-2 border-amber-400/60 bg-amber-950/20 p-5 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/30 pb-2.5">
+                  <div className="flex items-center gap-2 text-sm font-black text-amber-300">
+                    <Crown className="h-4 w-4" />
+                    <span>👥 團報對帳（{groupSummaries.length} 團）</span>
+                  </div>
+                  <span className="text-[11px] text-amber-200/80">團長統一匯款與收信，核帳後可一鍵整團入帳</span>
+                </div>
+                <div className="space-y-2.5">
+                  {groupSummaries.map((g) => (
+                    <div
+                      key={g.group_code}
+                      className={`rounded-xl border bg-slate-950/80 p-3.5 flex flex-wrap items-center justify-between gap-3 ${
+                        g.all_paid ? 'border-emerald-500/40' : 'border-amber-400/50'
+                      }`}
+                    >
+                      <div className="space-y-1 min-w-0 flex-1 text-xs">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="rounded bg-amber-400 px-2 py-0.5 font-mono-num font-black text-slate-950">
+                            {g.group_code}
+                          </span>
+                          <span className="font-black text-white text-sm">{g.group_name}</span>
+                          <span className="rounded bg-slate-800 border border-amber-400/40 px-2 py-0.5 font-bold text-amber-300">
+                            👑 團長：{g.leader.runner_name}（{g.leader.id_masked}）
+                          </span>
+                          <span
+                            className={`rounded-full px-2 py-0.5 font-bold ${
+                              g.all_paid
+                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                            }`}
+                          >
+                            {g.all_paid
+                              ? `✅ 全團 ${g.member_count} 人已入帳`
+                              : `待對帳 ${g.unpaid_count}/${g.member_count} 人`}
+                          </span>
+                          {g.remittance_last5 ? (
+                            <span className="rounded bg-sky-500/20 border border-sky-400/40 px-2 py-0.5 font-mono-num font-bold text-sky-300">
+                              統一末五碼 {g.remittance_last5}
+                            </span>
+                          ) : (
+                            <span className="rounded bg-slate-800 px-2 py-0.5 text-slate-400">
+                              尚未填報末五碼
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          團長信箱：<span className="font-mono-num text-slate-300">{g.leader.runner_email || '—'}</span> ｜ 成員：
+                          {g.members.map((m, idx) => (
+                            <span key={m.id} className="inline-block mr-2 text-slate-300">
+                              {idx === 0 || m.group_role === 'leader' ? '👑 ' : ''}
+                              {m.runner_name}({m.category_code || '—'}
+                              {m.bib_number ? `・${m.bib_number}` : ''})
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <div className="text-right">
+                          <div className="text-[10px] text-slate-400">共 {g.member_count} 人統一匯款</div>
+                          <div className="font-mono-num text-sm font-black text-amber-300">
+                            整團總額 NT$ {g.total_amount.toLocaleString()}
+                          </div>
+                        </div>
+                        {!g.all_paid && (
+                          <button
+                            type="button"
+                            onClick={() => handleGroupPaymentStatus(g.group_code, g.group_name, '已繳費')}
+                            className="rounded-xl bg-amber-500 hover:bg-amber-400 px-3.5 py-2 text-xs font-black text-slate-950 shadow"
+                          >
+                            💰 整團一次入帳 ({g.unpaid_count} 人)
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 📦 聯合報名合併單彙總區（比照路跑管理系統） */}
+            {eventBundles.length > 0 && (
+              <div className="rounded-2xl border-2 border-emerald-400/60 bg-emerald-950/20 p-5 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-500/30 pb-2.5">
+                  <div className="flex items-center gap-2 text-sm font-black text-emerald-300">
+                    <Package className="h-4 w-4" />
+                    <span>📦 聯合報名合併單（{eventBundles.length} 筆）</span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busyAction === 'bundle_excel'}
+                    onClick={handleExportBundleExcel}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs font-black text-white disabled:opacity-60"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    <span>匯出合併對帳表 (.xlsx)</span>
+                  </button>
+                </div>
+                <div className="space-y-2.5">
+                  {eventBundles.map((b) => {
+                    const thisEvItem = b.items.find((it) => Number(it.event_id) === Number(event.id));
+                    return (
+                      <div
+                        key={b.bundle_code}
+                        className={`rounded-xl border bg-slate-950/80 p-3.5 flex flex-wrap items-center justify-between gap-3 ${
+                          b.all_paid ? 'border-emerald-500/40' : 'border-amber-400/50'
+                        }`}
+                      >
+                        <div className="space-y-1 min-w-0 flex-1 text-xs">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="rounded bg-slate-800 border border-emerald-400/50 px-2 py-0.5 font-mono-num font-black text-emerald-300">
+                              {b.bundle_code}
+                            </span>
+                            <span className="font-black text-white text-sm">{b.runner_name}</span>
+                            <span className="font-mono-num text-slate-400">{b.id_masked}</span>
+                            <span
+                              className={`rounded-full px-2 py-0.5 font-bold ${
+                                b.all_paid
+                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                  : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                              }`}
+                            >
+                              {b.all_paid
+                                ? '✅ 已全數入帳'
+                                : `待對帳 ${b.unpaid_count}/${b.items.length} 場`}
+                            </span>
+                            {b.remittance_last5 ? (
+                              <span className="rounded bg-sky-500/20 border border-sky-400/40 px-2 py-0.5 font-mono-num font-bold text-sky-300">
+                                末五碼 {b.remittance_last5}
+                              </span>
+                            ) : (
+                              <span className="rounded bg-slate-800 px-2 py-0.5 text-slate-400">
+                                未填末五碼
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-400">
+                            包含場次：
+                            {b.items.map((it) => (
+                              <span
+                                key={it.reg_code}
+                                className={`inline-block mr-2 ${
+                                  Number(it.event_id) === Number(event.id)
+                                    ? 'text-lime-300 font-bold'
+                                    : 'text-slate-300'
+                                }`}
+                              >
+                                {Number(it.event_id) === Number(event.id) ? '★ ' : ''}
+                                {it.event_name}（{it.category_code || '—'}・NT$
+                                {Number(it.total_amount || 0).toLocaleString()}・{it.payment_status}）
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <div className="text-right">
+                            <div className="text-[10px] text-slate-400">
+                              本場 NT$ {Number(thisEvItem?.total_amount || 0).toLocaleString()}
+                            </div>
+                            <div className="font-mono-num text-sm font-black text-emerald-300">
+                              合併總額 NT$ {Number(b.total_amount || 0).toLocaleString()}
+                            </div>
+                          </div>
+                          {!b.all_paid &&
+                            (b.can_cross_confirm ? (
+                              <button
+                                type="button"
+                                onClick={() => handleBundlePaymentStatus(b.bundle_code, '已繳費')}
+                                className="rounded-xl bg-emerald-500 hover:bg-emerald-400 px-3.5 py-2 text-xs font-black text-slate-950 shadow"
+                              >
+                                💰 合併整單入帳 ({b.unpaid_count} 場)
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-amber-300 font-bold max-w-[140px]">
+                                跨承辦人單，請由最高管理員整單入帳或於下方單場入帳
+                              </span>
+                            ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* 對帳篩選與搜尋 */}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-1.5">
@@ -1394,9 +1694,25 @@ export default function AdminEventEditorPage() {
                               <span className="font-bold text-white text-sm">
                                 {reg.runner_name || '—'}
                               </span>
+                              {reg.group_code && (
+                                <span
+                                  className={`rounded-md px-1.5 py-0.5 text-[10px] font-black ${
+                                    reg.group_role === 'leader'
+                                      ? 'bg-amber-400 text-slate-950'
+                                      : 'bg-slate-800 text-slate-300'
+                                  }`}
+                                >
+                                  {reg.group_role === 'leader' ? '👑 團長' : '👥 組員'}
+                                </span>
+                              )}
                               {reg.group_name && (
                                 <span className="rounded-md border border-purple-400/40 bg-purple-500/20 px-2 py-0.5 text-[11px] font-bold text-purple-200">
                                   {reg.group_name}
+                                </span>
+                              )}
+                              {reg.bundle_code && (
+                                <span className="rounded-md border border-emerald-400/40 bg-emerald-500/20 px-2 py-0.5 font-mono-num text-[11px] font-bold text-emerald-300">
+                                  📦 {reg.bundle_code}
                                 </span>
                               )}
                               {isUnpaid && (
@@ -1890,6 +2206,7 @@ export default function AdminEventEditorPage() {
                     >
                       <option value="individual">個別匯款</option>
                       <option value="group">團體匯款</option>
+                      <option value="bundle">合併匯款</option>
                     </select>
                   </div>
                   <div>

@@ -315,12 +315,15 @@ export function validateFieldWithCrossChecks(
 
 /**
  * 前端送出前全欄位防呆檢查
+ * options.allowEmptyRemittance: 團報／聯合報名允許先留空事後補填末五碼
  */
-export function validateAllFields(fields, answers) {
+export function validateAllFields(fields, answers, options = {}) {
+  const allowEmptyRemittance = Boolean(options?.allowEmptyRemittance);
   const errors = {};
   for (const field of fields || []) {
+    const isRemit = field.id === 'remittance_last5' || field.validation === 'remittance_last5';
     const msg = validateSingleField(field, answers?.[field.id], {
-      checkRequired: true,
+      checkRequired: isRemit && allowEmptyRemittance ? false : true,
       allAnswers: answers,
       fields,
     });

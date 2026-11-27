@@ -196,7 +196,17 @@ function LinkedDatePicker({ field, value, onChange, onBlur, baseInputClass }) {
   );
 }
 
-export default function DynamicFormField({ field, value, onChange, onBlur, error, pricing, namePrefix = '' }) {
+export default function DynamicFormField({
+  field,
+  value,
+  onChange,
+  onBlur,
+  error,
+  pricing,
+  namePrefix = '',
+  readOnly = false,
+  labelBadge = '',
+}) {
   if (field.type === 'calculated') {
     return (
       <div className="tur-card rounded-2xl border border-amber-400/40 bg-slate-950/90 p-5 shadow-lg">
@@ -229,12 +239,14 @@ export default function DynamicFormField({ field, value, onChange, onBlur, error
 
   const validBadge = getFieldValidBadge(field, value, error);
 
-  const baseInputClass = `w-full rounded-xl border bg-slate-950/90 px-4 py-3 text-sm sm:text-base text-white placeholder-slate-500 transition focus:outline-none focus:ring-2 ${
-    error
-      ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/30'
+  const baseInputClass = `w-full rounded-xl border px-4 py-3 text-sm sm:text-base placeholder-slate-500 transition focus:outline-none focus:ring-2 ${
+    readOnly
+      ? 'border-amber-500/40 bg-amber-950/25 text-amber-100 cursor-not-allowed'
+      : error
+      ? 'border-rose-500 bg-slate-950/90 text-white focus:border-rose-500 focus:ring-rose-500/30'
       : validBadge
-      ? 'border-emerald-500/70 focus:border-emerald-400 focus:ring-emerald-400/25'
-      : 'border-slate-700/90 hover:border-slate-500 focus:border-lime-400 focus:ring-lime-400/25'
+      ? 'border-emerald-500/70 bg-slate-950/90 text-white focus:border-emerald-400 focus:ring-emerald-400/25'
+      : 'border-slate-700/90 bg-slate-950/90 text-white hover:border-slate-500 focus:border-lime-400 focus:ring-lime-400/25'
   }`;
 
   const renderControl = () => {
@@ -392,16 +404,20 @@ export default function DynamicFormField({ field, value, onChange, onBlur, error
       <div className="relative">
         <input
           type={inputType}
+          readOnly={readOnly}
+          disabled={readOnly}
           inputMode={isPhoneField || isRemittanceField ? 'numeric' : undefined}
           maxLength={isTwIdField ? 10 : isRemittanceField ? 5 : isPhoneField ? 12 : undefined}
           min={field.type === 'number' ? 0 : undefined}
           value={value ?? ''}
           onChange={(e) => {
+            if (readOnly) return;
             let nextVal = e.target.value;
             if (isTwIdField) nextVal = nextVal.toUpperCase();
             onChange(field.id, nextVal);
           }}
           onBlur={(e) => {
+            if (readOnly) return;
             let blurVal = e.target.value;
             if (isTwIdField) blurVal = blurVal.toUpperCase();
             if (onBlur) onBlur(field.id, blurVal);
@@ -435,6 +451,11 @@ export default function DynamicFormField({ field, value, onChange, onBlur, error
         <span>
           {displayLabel}
           {field.required && <span className="ml-1 text-lime-400">*</span>}
+          {labelBadge && (
+            <span className="ml-2 rounded-md border border-amber-400/40 bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-extrabold text-amber-300">
+              {labelBadge}
+            </span>
+          )}
         </span>
       </label>
 

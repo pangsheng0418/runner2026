@@ -12,6 +12,7 @@ import {
   ChevronUp,
   Tag,
   Users,
+  ShoppingCart,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import TurHeader from '../components/TurHeader';
@@ -147,6 +148,7 @@ export default function HomePage() {
     <div className="min-h-screen flex flex-col">
       <TurHeader
         title="TUR 活動報名平台"
+        showMultiLink
         showLookupLink
         showAdminLink
       />
@@ -155,12 +157,21 @@ export default function HomePage() {
         {/* 頂部篩選控制列 */}
         <section className="tur-control-bar rounded-2xl p-3.5 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Trophy className="h-5 w-5 text-lime-400 shrink-0" />
               <h2 className="text-base font-black text-white">開放中活動</h2>
               <span className="rounded-full bg-emerald-500/20 border border-emerald-400/40 px-2 py-0.5 font-mono-num text-xs font-extrabold text-emerald-300">
                 {events.length} 場
               </span>
+              {events.length >= 1 && (
+                <Link
+                  to="/multi-register"
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 px-3 py-1 text-xs font-black text-slate-950 hover:bg-emerald-400 transition shadow"
+                >
+                  <ShoppingCart className="h-3.5 w-3.5" />
+                  <span>多場聯合報名</span>
+                </Link>
+              )}
             </div>
 
             <div className="relative w-full sm:w-72">
@@ -362,10 +373,18 @@ export default function HomePage() {
 
                             <Link
                               to={`/register/${ev.slug}`}
-                              className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 px-4 py-1.5 text-xs sm:text-sm font-black text-slate-950 hover:from-emerald-400 hover:to-lime-300 shadow-md shadow-emerald-950/40 transition whitespace-nowrap"
+                              className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 px-3.5 py-1.5 text-xs sm:text-sm font-black text-slate-950 hover:from-emerald-400 hover:to-lime-300 shadow-md shadow-emerald-950/40 transition whitespace-nowrap"
                             >
-                              <span>報名</span>
+                              <span>個人報名</span>
                               <ArrowRight className="h-3.5 w-3.5" />
+                            </Link>
+
+                            <Link
+                              to={`/register/${ev.slug}?regType=group`}
+                              className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 px-3.5 py-1.5 text-xs sm:text-sm font-black text-slate-950 shadow-md shadow-amber-950/40 transition whitespace-nowrap"
+                            >
+                              <Users className="h-3.5 w-3.5" />
+                              <span>團體報名</span>
                             </Link>
                           </div>
                         </div>

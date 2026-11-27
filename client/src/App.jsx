@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { getAdminToken } from './api/client';
 import HomePage from './pages/HomePage';
 import PublicRegisterPage from './pages/PublicRegisterPage';
+import MultiRegisterPage from './pages/MultiRegisterPage';
 import LookupRegistrationPage from './pages/LookupRegistrationPage';
 import AdminLoginPage from './pages/AdminLoginPage';
 import AdminDashboardPage from './pages/AdminDashboardPage';
@@ -22,6 +23,7 @@ export default function App() {
       <Routes>
         {/* 前台公開路由 */}
         <Route path="/" element={<HomePage />} />
+        <Route path="/multi-register" element={<MultiRegisterPage />} />
         <Route path="/lookup" element={<LookupRegistrationPage />} />
         <Route path="/register/:slug" element={<PublicRegisterPage />} />
 
